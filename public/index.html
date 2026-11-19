@@ -1,0 +1,1966 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kasir Resto Rasa Nusantara - POS Dashboard</title>
+  <style>
+    :root {
+      --bg-main: #f1f5f9;
+      --bg-card: #ffffff;
+      --bg-subtle: #f8fafc;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #ea580c;
+      --primary-hover: #c2410c;
+      --primary-subtle: #ffedd5;
+      --success: #16a34a;
+      --success-subtle: #dcfce7;
+      --warning: #d97706;
+      --warning-subtle: #fef3c7;
+      --danger: #dc2626;
+      --danger-subtle: #fee2e2;
+      --info: #2563eb;
+      --info-subtle: #dbeafe;
+      --radius: 10px;
+      --shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    }
+    .theme-dark {
+      --bg-main: #0b1120;
+      --bg-card: #1e293b;
+      --bg-subtle: #0f172a;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --primary-subtle: #431407;
+      --success-subtle: #052e16;
+      --warning-subtle: #451a03;
+      --danger-subtle: #450a0a;
+      --info-subtle: #172554;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
+    
+    header { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 40; box-shadow: var(--shadow); }
+    .brand-group { display: flex; align-items: center; gap: 12px; }
+    .brand-icon { width: 38px; height: 38px; background: var(--primary); color: #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; }
+    .brand-title { font-size: 18px; font-weight: 700; }
+    .brand-subtitle { font-size: 11px; color: var(--text-muted); }
+    .header-actions { display: flex; align-items: center; gap: 14px; }
+    .clock-badge { font-family: monospace; font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; color: var(--text-muted); }
+    .cashier-tag { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+    .cashier-avatar { width: 28px; height: 28px; background: var(--info-subtle); color: var(--info); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
+    
+    .btn { border: none; outline: none; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-subtle { background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border); }
+    .btn-subtle:hover { background: var(--border); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+    .btn-lg { padding: 10px 18px; font-size: 14px; border-radius: 8px; }
+    
+    .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; padding: 16px 20px 0; }
+    .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+    .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+    .stat-value { font-size: 20px; font-weight: 700; }
+    .stat-meta { font-size: 11px; margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+    .stat-meta.up { color: var(--success); }
+    
+    .layout-container { display: grid; grid-template-columns: 1fr 390px; gap: 16px; padding: 16px 20px 24px; flex: 1; align-items: start; }
+    @media (max-width: 1024px) {
+      .layout-container { grid-template-columns: 1fr; }
+    }
+    
+    .main-workspace { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .nav-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 8px; overflow-x: auto; }
+    .tab-btn { background: transparent; border: none; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+    .tab-btn.active { background: var(--primary-subtle); color: var(--primary); }
+    
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+    .card-title-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .card-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    
+    .table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+    .table-box { background: var(--bg-subtle); border: 2px solid var(--border); border-radius: 8px; padding: 12px; cursor: pointer; transition: transform 0.15s, border-color 0.15s; position: relative; text-align: center; }
+    .table-box:hover { transform: translateY(-2px); }
+    .table-box.kosong { border-color: var(--success); }
+    .table-box.terisi { border-color: var(--warning); background: var(--warning-subtle); }
+    .table-box.menunggu_bayar, .table-box.menunggu { border-color: var(--danger); background: var(--danger-subtle); }
+    .table-box.reservasi { border-color: var(--info); background: var(--info-subtle); }
+    .table-name { font-size: 16px; font-weight: 800; }
+    .table-status { font-size: 11px; font-weight: 600; text-transform: uppercase; margin-top: 4px; }
+    .table-amount { font-size: 11px; margin-top: 4px; font-weight: 700; color: var(--text-main); }
+    
+    .active-orders-list { display: flex; flex-direction: column; gap: 10px; max-height: 380px; overflow-y: auto; }
+    .order-card-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-subtle); gap: 10px; }
+    .order-row-info { display: flex; flex-direction: column; gap: 2px; }
+    .order-badge-type { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; width: fit-content; }
+    
+    .menu-filter-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; justify-content: space-between; }
+    .category-pills { display: flex; gap: 6px; overflow-x: auto; }
+    .pill-btn { border: 1px solid var(--border); background: var(--bg-card); padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text-muted); }
+    .pill-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .search-box { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-main); font-size: 12px; min-width: 180px; outline: none; }
+    
+    .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; max-height: 580px; overflow-y: auto; padding-right: 4px; }
+    .menu-item-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; transition: 0.15s; position: relative; }
+    .menu-item-card:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+    .menu-img-wrap { width: 100%; height: 100px; background: #cbd5e1; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .menu-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+    .menu-fallback { font-size: 32px; font-weight: 700; color: #fff; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+    .badge-stock { position: absolute; top: 6px; right: 6px; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+    .menu-info { padding: 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+    .menu-title { font-size: 13px; font-weight: 700; line-height: 1.2; }
+    .menu-price { font-size: 13px; font-weight: 700; color: var(--primary); margin-top: auto; }
+    .menu-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+    
+    .order-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; height: calc(100vh - 170px); position: sticky; top: 76px; box-shadow: var(--shadow); }
+    .order-header { padding: 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .order-items-scroll { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .order-item-row { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
+    .order-item-main { display: flex; justify-content: space-between; align-items: center; }
+    .qty-controls { display: flex; align-items: center; gap: 6px; }
+    .qty-btn { width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-subtle); cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; }
+    .item-note-input { width: 100%; font-size: 11px; border: none; background: var(--bg-subtle); padding: 4px 6px; border-radius: 4px; color: var(--text-main); outline: none; }
+    
+    .order-footer { padding: 14px; border-top: 1px solid var(--border); background: var(--bg-subtle); border-radius: 0 0 var(--radius) var(--radius); }
+    .calc-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; color: var(--text-muted); }
+    .calc-row.total { font-size: 16px; font-weight: 800; color: var(--text-main); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+    .payment-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0; }
+    .pay-btn-opt { border: 1px solid var(--border); padding: 6px; border-radius: 6px; font-size: 11px; font-weight: 600; text-align: center; cursor: pointer; background: var(--bg-card); }
+    .pay-btn-opt.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .order-btn-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 8px; }
+    
+    .pay-bars { display: flex; flex-direction: column; gap: 8px; }
+    .pay-bar-row { display: flex; flex-direction: column; gap: 3px; }
+    .pay-bar-label { display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; }
+    .pay-bar-track { height: 7px; background: var(--bg-subtle); border-radius: 4px; overflow: hidden; display: flex; }
+    .pay-bar-fill { height: 100%; border-radius: 4px; }
+    
+    .hourly-chart { display: flex; align-items: flex-end; gap: 6px; height: 130px; padding-top: 20px; }
+    .chart-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+    .chart-bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--primary-subtle); transition: height 0.3s; min-height: 4px; }
+    .chart-bar.peak { background: var(--primary); }
+    .chart-col-label { font-size: 9px; color: var(--text-muted); }
+    
+    .table-responsive { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .table-responsive th, .table-responsive td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+    .table-responsive th { color: var(--text-muted); font-weight: 600; background: var(--bg-subtle); }
+    
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 100; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+    .modal-overlay.open { display: flex; }
+    .modal-card { background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--border); width: 95%; max-width: 440px; padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto; }
+    
+    #receipt-print-area { display: none; width: 280px; margin: 0 auto; font-family: monospace; font-size: 11px; padding: 12px; }
+    @media print {
+      body * { visibility: hidden; }
+      #receipt-print-area, #receipt-print-area * { visibility: visible; }
+      #receipt-print-area { display: block; position: absolute; left: 0; top: 0; width: 100%; }
+    }
+    
+    .notification-dropdown { position: absolute; top: 60px; right: 20px; width: 320px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); z-index: 50; display: none; padding: 12px; }
+    .notification-dropdown.open { display: block; }
+    .notif-item { padding: 8px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; gap: 8px; }
+    .toast-container { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 999; }
+    .toast { background: var(--text-main); color: var(--bg-main); padding: 10px 16px; border-radius: 6px; font-size: 12px; font-weight: 600; box-shadow: var(--shadow); animation: slideIn 0.2s ease-out; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+    /* Login Modal Overlay */
+    #modal-login { z-index: 200; }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN OVERLAY -->
+  <div class="modal-overlay" id="modal-login">
+    <div class="modal-card" style="max-width: 360px;">
+      <div style="text-align: center; margin-bottom: 16px;">
+        <div style="width: 48px; height: 48px; background: var(--primary); color: #fff; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 26px; margin-bottom: 8px;">🍛</div>
+        <div style="font-size: 18px; font-weight: 800;">Resto Rasa Nusantara</div>
+        <div style="font-size: 12px; color: var(--text-muted);">Masuk ke Dashboard Kasir</div>
+      </div>
+      <form id="form-login" onsubmit="handleLoginSubmit(event)">
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Username</label>
+          <input type="text" id="login-username" required placeholder="cth: budi, spv, admin" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; outline: none;">
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Password</label>
+          <input type="password" id="login-password" required placeholder="Password default: admin123" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; outline: none;">
+        </div>
+        <div id="login-error-msg" style="color: var(--danger); font-size: 12px; margin-bottom: 12px; display: none;"></div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 10px;">Masuk ke Kasir</button>
+      </form>
+      <div style="margin-top: 14px; font-size: 11px; color: var(--text-muted); background: var(--bg-subtle); padding: 8px; border-radius: 6px; line-height: 1.4;">
+        <strong>Akun Tersedia:</strong><br>
+        • Kasir: <code>budi</code> / <code>admin123</code><br>
+        • Kasir: <code>sari</code> / <code>admin123</code><br>
+        • Supervisor: <code>spv</code> / <code>admin123</code> (PIN: 1234)<br>
+        • Admin: <code>admin</code> / <code>admin123</code> (PIN: 1234)
+      </div>
+    </div>
+  </div>
+
+  <header>
+    <div class="brand-group">
+      <div class="brand-icon">🍛</div>
+      <div>
+        <div class="brand-title">Resto Rasa Nusantara</div>
+        <div class="brand-subtitle">Kasir & Manajemen Pesanan Dine-In</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="clock-badge" id="live-clock">--:--:-- WIB</div>
+      <div class="cashier-tag" id="user-profile-tag" style="cursor: pointer;" title="Klik untuk keluar" onclick="logoutUser()">
+        <div class="cashier-avatar" id="header-user-avatar">?</div>
+        <div>
+          <div id="header-user-name" style="font-weight: 700;">Memuat...</div>
+          <div id="header-user-role" style="font-size: 10px; color: var(--text-muted);">Keluar ↗</div>
+        </div>
+      </div>
+      <button class="btn btn-subtle btn-sm" id="btn-theme-toggle" title="Ganti Tema">🌙</button>
+      <div style="position:relative;">
+        <button class="btn btn-subtle btn-sm" id="btn-notif-toggle">🔔 <span id="notif-badge" style="background:var(--danger);color:#fff;font-size:9px;padding:1px 5px;border-radius:10px;">0</span></button>
+        <div class="notification-dropdown" id="notif-dropdown">
+          <div style="font-weight:700;font-size:12px;margin-bottom:8px;display:flex;justify-content:space-between;">
+            <span>Notifikasi & Alert</span>
+            <span style="font-weight:normal;color:var(--text-muted);cursor:pointer;" onclick="clearNotifications()">Hapus Semua</span>
+          </div>
+          <div id="notif-list-container"></div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-lg" onclick="openNewOrderModal()">+ Pesanan Baru</button>
+    </div>
+  </header>
+
+  <section class="stats-bar">
+    <div class="stat-card">
+      <div class="stat-label">Total Penjualan Hari Ini</div>
+      <div class="stat-value" id="stat-sales">Rp 0</div>
+      <div class="stat-meta up" id="stat-sales-meta">▲ 0% vs kemarin</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Jumlah Transaksi</div>
+      <div class="stat-value" id="stat-count">0 Nota</div>
+      <div class="stat-meta">Rata-rata: <strong id="stat-avg">Rp 0</strong></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Pajak (10%) & Service (5%)</div>
+      <div class="stat-value" id="stat-tax-service">Rp 0</div>
+      <div class="stat-meta">Total potongan diskon: <span id="stat-discount" style="color:var(--danger);">Rp 0</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Shift Kasir Aktif</div>
+      <div class="stat-value" id="stat-shift-cash">Rp 0</div>
+      <div class="stat-meta"><button class="btn btn-subtle btn-sm" style="padding:2px 6px;" onclick="openShiftModal()">Kelola / Tutup Shift</button></div>
+    </div>
+  </section>
+
+  <main class="layout-container">
+    <div class="main-workspace">
+      
+      <div class="nav-tabs">
+        <button class="tab-btn active" onclick="switchTab('meja')">🪑 Denah Meja & Pesanan</button>
+        <button class="tab-btn" onclick="switchTab('menu')">🍽️ Katalog Menu</button>
+        <button class="tab-btn" onclick="switchTab('laporan')">📊 Penjualan & Laporan</button>
+        <button class="tab-btn" onclick="switchTab('transaksi')">🧾 Riwayat Transaksi</button>
+      </div>
+
+      <!-- TAB 1: MEJA & PESANAN AKTIF -->
+      <div id="tab-pane-meja" style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card">
+          <div class="card-title-bar">
+            <div class="card-title">🪑 Denah Meja Dine-in</div>
+            <div style="display:flex;gap:10px;font-size:11px;">
+              <span style="color:var(--success);">● Kosong</span>
+              <span style="color:var(--warning);">● Terisi</span>
+              <span style="color:var(--danger);">● Menunggu Bayar</span>
+              <span style="color:var(--info);">● Reservasi</span>
+            </div>
+          </div>
+          <div class="table-grid" id="tables-container"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title-bar">
+            <div class="card-title">⚡ Antrean Pesanan Berjalan</div>
+            <span style="font-size:11px;color:var(--text-muted);" id="active-orders-count">0 Pesanan</span>
+          </div>
+          <div class="active-orders-list" id="active-orders-container"></div>
+        </div>
+      </div>
+
+      <!-- TAB 2: KATALOG MENU -->
+      <div id="tab-pane-menu" style="display:none;flex-direction:column;gap:16px;">
+        <div class="card">
+          <div class="menu-filter-bar">
+            <div class="category-pills" id="category-pills">
+              <button class="pill-btn active" onclick="filterCategory('Semua')">Semua</button>
+            </div>
+            <input type="text" class="search-box" id="menu-search-input" placeholder="Cari menu..." oninput="handleMenuSearch(this.value)">
+          </div>
+          <div class="menu-grid" id="menu-grid-container"></div>
+        </div>
+      </div>
+
+      <!-- TAB 3: PENJUALAN & LAPORAN -->
+      <div id="tab-pane-laporan" style="display:none;flex-direction:column;gap:16px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="card">
+            <div class="card-title">💳 Penjualan Berdasarkan Metode</div>
+            <div class="pay-bars" id="payment-methods-bars" style="margin-top:14px;"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">⏰ Grafik Penjualan Per Jam</div>
+            <div class="hourly-chart" id="hourly-chart-bars"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">🏆 Top 5 Menu Terlaris Hari Ini</div>
+          <table class="table-responsive" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>Peringkat</th>
+                <th>Nama Menu</th>
+                <th>Kategori</th>
+                <th>Terjual</th>
+                <th>Total Pendapatan</th>
+              </tr>
+            </thead>
+            <tbody id="top-sellers-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 4: RIWAYAT TRANSAKSI -->
+      <div id="tab-pane-transaksi" style="display:none;flex-direction:column;gap:16px;">
+        <div class="card">
+          <div class="card-title-bar">
+            <div class="card-title">🧾 10 Transaksi Terakhir</div>
+            <span style="font-size:11px;color:var(--text-muted);">Void memerlukan PIN Supervisor</span>
+          </div>
+          <table class="table-responsive">
+            <thead>
+              <tr>
+                <th>No. Trx</th>
+                <th>Meja/Tipe</th>
+                <th>Waktu</th>
+                <th>Metode</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="transactions-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ORDER PANEL (SIDEBAR KANAN) -->
+    <aside class="order-panel">
+      <div class="order-header">
+        <div>
+          <div style="font-size:14px;font-weight:800;" id="panel-order-title">Pesanan Baru</div>
+          <div style="font-size:11px;color:var(--text-muted);" id="panel-order-subtitle">Pilih meja atau jenis pesanan</div>
+        </div>
+        <button class="btn btn-subtle btn-sm" onclick="resetCurrentOrder()">Batal</button>
+      </div>
+
+      <div class="order-items-scroll" id="order-items-list">
+        <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:40px;">Belum ada item dipilih.<br>Klik menu untuk menambahkan.</div>
+      </div>
+
+      <div class="order-footer">
+        <div class="calc-row">
+          <span>Subtotal</span>
+          <span id="calc-subtotal">Rp 0</span>
+        </div>
+        <div class="calc-row" style="align-items:center;">
+          <span>Diskon (%)</span>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <input type="number" id="input-discount-percent" value="0" min="0" max="100" style="width:48px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px;" onchange="handleDiscountChange(this.value)">
+            <span id="calc-discount" style="color:var(--danger);">- Rp 0</span>
+          </div>
+        </div>
+        <div class="calc-row">
+          <span>Pajak Resto (10%)</span>
+          <span id="calc-tax">Rp 0</span>
+        </div>
+        <div class="calc-row">
+          <span>Service Charge (5%)</span>
+          <span id="calc-service">Rp 0</span>
+        </div>
+        <div class="calc-row total">
+          <span>TOTAL</span>
+          <span id="calc-total">Rp 0</span>
+        </div>
+
+        <div style="font-size:11px;font-weight:700;margin-top:10px;">Metode Pembayaran:</div>
+        <div class="payment-options" id="payment-options-container">
+          <div class="pay-btn-opt active" onclick="setPaymentMethod('Tunai', 1)">Tunai</div>
+          <div class="pay-btn-opt" onclick="setPaymentMethod('QRIS', 2)">QRIS</div>
+          <div class="pay-btn-opt" onclick="setPaymentMethod('Kartu', 3)">Kartu</div>
+          <div class="pay-btn-opt" onclick="setPaymentMethod('E-wallet', 4)">E-Wallet</div>
+        </div>
+
+        <div id="cash-input-group" style="margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:4px;">
+            <span>Uang Diterima:</span>
+            <span id="calc-change" style="font-weight:700;color:var(--success);">Kembali: Rp 0</span>
+          </div>
+          <input type="number" id="input-cash-received" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;" placeholder="Nominal uang..." oninput="calculateChange()">
+          <div style="display:flex;gap:4px;margin-top:4px;">
+            <button class="btn btn-subtle btn-sm" style="flex:1;font-size:10px;" onclick="quickCash('exact')">Uang Pas</button>
+            <button class="btn btn-subtle btn-sm" style="flex:1;font-size:10px;" onclick="quickCash(50000)">50.000</button>
+            <button class="btn btn-subtle btn-sm" style="flex:1;font-size:10px;" onclick="quickCash(100000)">100.000</button>
+          </div>
+        </div>
+
+        <div class="order-btn-actions">
+          <button class="btn btn-subtle" onclick="holdCurrentOrder()">Hold</button>
+          <button class="btn btn-primary" onclick="processPayment()">Bayar & Cetak</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- MODAL: PESANAN BARU -->
+  <div class="modal-overlay" id="modal-new-order">
+    <div class="modal-card">
+      <div class="card-title" style="margin-bottom:12px;">Buka Pesanan Baru</div>
+      <div style="font-size:12px;margin-bottom:8px;">Pilih Jenis Layanan:</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+        <button class="btn btn-subtle" id="type-opt-dinein" onclick="selectOrderType('dine_in', 'Dine-in')">🍽️ Dine-in</button>
+        <button class="btn btn-subtle" id="type-opt-takeaway" onclick="selectOrderType('take_away', 'Take Away')">🥡 Take Away</button>
+        <button class="btn btn-subtle" id="type-opt-gofood" onclick="selectOrderType('delivery', 'Delivery: GoFood', 'gofood')">🛵 GoFood</button>
+        <button class="btn btn-subtle" id="type-opt-grabfood" onclick="selectOrderType('delivery', 'Delivery: GrabFood', 'grabfood')">🛵 GrabFood</button>
+      </div>
+
+      <div id="select-table-wrap">
+        <div style="font-size:12px;margin-bottom:6px;">Pilih Meja Tersedia:</div>
+        <select id="modal-select-table" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);margin-bottom:14px;"></select>
+      </div>
+
+      <div id="customer-name-wrap" style="display:none;margin-bottom:14px;">
+        <div style="font-size:12px;margin-bottom:6px;">Nama Pelanggan (opsional):</div>
+        <input type="text" id="modal-customer-name" placeholder="Nama Pelanggan" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);font-size:12px;">
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-subtle" onclick="closeModal('modal-new-order')">Batal</button>
+        <button class="btn btn-primary" onclick="confirmNewOrder()">Mulai Catat Pesanan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PIN SUPERVISOR -->
+  <div class="modal-overlay" id="modal-supervisor-pin">
+    <div class="modal-card" style="max-width:320px;text-align:center;">
+      <div style="font-size:30px;margin-bottom:6px;">🔒</div>
+      <div class="card-title" style="justify-content:center;margin-bottom:6px;">Otorisasi Supervisor</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" id="pin-reason-text">Masukkan PIN supervisor untuk melanjutkan.</p>
+      <input type="password" id="supervisor-pin-input" maxlength="4" style="letter-spacing:8px;text-align:center;font-size:24px;width:140px;padding:8px;border:2px solid var(--border);border-radius:8px;margin-bottom:14px;" placeholder="••••" onkeydown="if(event.key==='Enter') verifySupervisorPin()">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:14px;">PIN default: 1234 (Supervisor / Admin)</div>
+      <div style="display:flex;gap:8px;justify-content:center;">
+        <button class="btn btn-subtle" onclick="closeModal('modal-supervisor-pin')">Batal</button>
+        <button class="btn btn-primary" onclick="verifySupervisorPin()">Verifikasi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: SPLIT BILL -->
+  <div class="modal-overlay" id="modal-split-bill">
+    <div class="modal-card">
+      <div class="card-title">Simulasi Split Bill</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" id="split-bill-info"></p>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;display:block;margin-bottom:4px;">Bagi rata jumlah orang:</label>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-subtle" onclick="calculateSplit(2)">2 Orang</button>
+          <button class="btn btn-subtle" onclick="calculateSplit(3)">3 Orang</button>
+          <button class="btn btn-subtle" onclick="calculateSplit(4)">4 Orang</button>
+          <button class="btn btn-subtle" onclick="calculateSplit(5)">5 Orang</button>
+        </div>
+      </div>
+      <div id="split-result-box" style="background:var(--bg-subtle);padding:12px;border-radius:6px;font-size:13px;font-weight:700;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button class="btn btn-primary" onclick="closeModal('modal-split-bill')">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: KELOLA / TUTUP SHIFT -->
+  <div class="modal-overlay" id="modal-shift">
+    <div class="modal-card">
+      <div class="card-title">Kelola Shift Kasir</div>
+
+      <!-- State: No Open Shift -->
+      <div id="shift-closed-section" style="display:none;padding:12px 0;">
+        <div style="background:var(--warning-subtle);color:var(--warning);padding:10px;border-radius:6px;font-size:12px;margin-bottom:14px;">
+          ⚠️ Anda belum memiliki shift yang sedang aktif. Silakan buka shift baru untuk dapat memproses pesanan.
+        </div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Masukkan Modal Awal Kasir:</div>
+        <input type="number" id="shift-open-cash-input" placeholder="cth: 500000" value="500000" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-bottom:12px;">
+        <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="executeOpenShift()">Buka Shift Baru</button>
+      </div>
+
+      <!-- State: Shift Open -->
+      <div id="shift-open-section">
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;margin:12px 0;">
+          <div style="display:flex;justify-content:space-between;"><span>Modal Awal:</span><strong id="shift-modal-opening">Rp 0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>Total Tunai Masuk:</span><strong id="shift-modal-cash-in" style="color:var(--success);">Rp 0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>Kas Keluar / Operasional:</span><strong id="shift-modal-cash-out" style="color:var(--danger);">Rp 0</strong></div>
+          <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:6px;font-size:14px;">
+            <span>Saldo Kas Seharusnya:</span><strong id="shift-modal-expected">Rp 0</strong>
+          </div>
+        </div>
+
+        <div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Tambah Kas Keluar (Beli es, belanja kecil):</div>
+          <div style="display:flex;gap:6px;margin-bottom:12px;">
+            <input type="text" id="shift-expense-note" placeholder="Keterangan..." style="flex:2;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+            <input type="number" id="shift-expense-amount" placeholder="Nominal" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+            <button class="btn btn-subtle" onclick="recordCashExpense()">Catat</button>
+          </div>
+        </div>
+
+        <div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Hitung Kas Fisik (Tutup Shift):</div>
+          <input type="number" id="shift-actual-cash-input" placeholder="Masukkan hitungan uang fisik di laci..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:12px;margin-bottom:8px;">
+        </div>
+
+        <div style="display:flex;justify-content:space-between;margin-top:14px;">
+          <button class="btn btn-subtle" onclick="closeModal('modal-shift')">Batal</button>
+          <button class="btn btn-danger" onclick="executeCloseShift()">Selesaikan & Tutup Shift</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AREA PRINT STRUK -->
+  <div id="receipt-print-area">
+    <div style="text-align:center;margin-bottom:10px;">
+      <h3 style="margin:0;">RESTO RASA NUSANTARA</h3>
+      <p style="margin:2px 0;">Jl. Kuliner No. 88, Jakarta</p>
+      <p style="margin:2px 0;">Telp: (021) 555-0199</p>
+      <hr style="border:none;border-top:1px dashed #000;margin:6px 0;">
+    </div>
+    <div id="receipt-meta"></div>
+    <hr style="border:none;border-top:1px dashed #000;margin:6px 0;">
+    <div id="receipt-items-list"></div>
+    <hr style="border:none;border-top:1px dashed #000;margin:6px 0;">
+    <div id="receipt-totals"></div>
+    <div style="text-align:center;margin-top:14px;">
+      <p style="margin:2px 0;">Terima Kasih atas Kunjungan Anda!</p>
+      <p style="margin:2px 0;">WiFi: Nusantara_Guest / Password: makanenak</p>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    // ---------- STATE MANAGEMENT ----------
+    let currentUser = JSON.parse(localStorage.getItem("pos_user")) || null;
+    let authToken = localStorage.getItem("pos_jwt") || null;
+
+    let categories = [];
+    let menu = [];
+    let tables = [];
+    let activeOrders = [];
+    let currentShift = null;
+    let paymentMethods = [];
+    let notifications = [];
+
+    let currentOrder = {
+      id: null,
+      order_no: null,
+      target: "Meja 01",
+      table_id: null,
+      type: "dine_in",
+      platform: null,
+      customer_name: null,
+      items: [],
+      discountPercent: 0,
+      paymentMethod: "Tunai",
+      paymentMethodId: 1
+    };
+
+    let pendingSupervisorAction = null;
+    let selectedOrderTypeChoice = "dine_in";
+    let selectedOrderTypeLabel = "Dine-in";
+    let selectedPlatform = null;
+    let activeCategoryFilter = "Semua";
+    let searchQuery = "";
+    let pollingInterval = null;
+
+    // Helper formatting currency
+    function formatRp(num) {
+      return "Rp " + Math.round(num || 0).toLocaleString("id-ID");
+    }
+
+    // ---------- API CLIENT HELPER ----------
+    async function api(path, options = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      try {
+        const res = await fetch(path, { ...options, headers });
+        if (res.status === 401) {
+          // Token expired or invalid
+          localStorage.removeItem("pos_jwt");
+          localStorage.removeItem("pos_user");
+          authToken = null;
+          currentUser = null;
+          openModal("modal-login");
+          throw new Error("Sesi berakhir, silakan login kembali");
+        }
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Terjadi kesalahan pada server");
+        }
+        return data;
+      } catch (err) {
+        showToast(err.message);
+        throw err;
+      }
+    }
+
+    // ---------- TOAST SYSTEM ----------
+    function showToast(msg) {
+      const container = document.getElementById("toast-container");
+      const t = document.createElement("div");
+      t.className = "toast";
+      t.textContent = msg;
+      container.appendChild(t);
+      setTimeout(() => t.remove(), 3200);
+    }
+
+    // ---------- CLOCK RUNNER ----------
+    function startClock() {
+      const clockEl = document.getElementById("live-clock");
+      function update() {
+        const now = new Date();
+        const dNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+        const d = dNames[now.getDay()];
+        const dateStr = now.toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+        const timeStr = now.toTimeString().split(" ")[0];
+        clockEl.textContent = `${d}, ${dateStr} • ${timeStr} WIB`;
+      }
+      update();
+      setInterval(update, 1000);
+    }
+
+    // ---------- LOGIN & LOGOUT ----------
+    async function handleLoginSubmit(e) {
+      e.preventDefault();
+      const errEl = document.getElementById("login-error-msg");
+      errEl.style.display = "none";
+      const u = document.getElementById("login-username").value.trim();
+      const p = document.getElementById("login-password").value;
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: u, password: p })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.error || "Login gagal";
+          errEl.style.display = "block";
+          return;
+        }
+
+        authToken = data.token;
+        currentUser = data.user;
+        localStorage.setItem("pos_jwt", authToken);
+        localStorage.setItem("pos_user", JSON.stringify(currentUser));
+
+        closeModal("modal-login");
+        updateUserProfileHeader();
+        initApp();
+        showToast(`Selamat datang, ${currentUser.name}!`);
+      } catch (err) {
+        errEl.textContent = err.message || "Koneksi ke server gagal";
+        errEl.style.display = "block";
+      }
+    }
+
+    function logoutUser() {
+      if (confirm("Apakah Anda yakin ingin keluar dari sistem kasir?")) {
+        localStorage.removeItem("pos_jwt");
+        localStorage.removeItem("pos_user");
+        authToken = null;
+        currentUser = null;
+        if (pollingInterval) clearInterval(pollingInterval);
+        openModal("modal-login");
+      }
+    }
+
+    function updateUserProfileHeader() {
+      if (!currentUser) return;
+      document.getElementById("header-user-avatar").textContent = currentUser.name.charAt(0).toUpperCase();
+      document.getElementById("header-user-name").textContent = currentUser.name;
+      document.getElementById("header-user-role").textContent = `${currentUser.role.toUpperCase()} (Keluar ↗)`;
+    }
+
+    // ---------- DATA FETCHING ----------
+    async function fetchAllData() {
+      try {
+        await Promise.all([
+          fetchSummary(),
+          fetchTables(),
+          fetchActiveOrders(),
+          fetchCategories(),
+          fetchProducts(),
+          fetchPaymentMethods(),
+          fetchCurrentShift(),
+          fetchAlerts(),
+          fetchRecentTransactions()
+        ]);
+      } catch (e) {
+        console.error("Error loading app data:", e);
+      }
+    }
+
+    async function fetchSummary() {
+      try {
+        const data = await api('/api/dashboard/summary');
+        document.getElementById("stat-sales").textContent = formatRp(data.total_sales);
+        const metaEl = document.getElementById("stat-sales-meta");
+        const change = data.percentage_change || 0;
+        metaEl.textContent = (change >= 0 ? `▲ +${change}%` : `▼ ${change}%`) + " vs kemarin";
+        metaEl.className = "stat-meta " + (change >= 0 ? "up" : "down");
+
+        document.getElementById("stat-count").textContent = `${data.transaction_count} Nota`;
+        document.getElementById("stat-avg").textContent = formatRp(data.avg_per_transaction);
+        document.getElementById("stat-tax-service").textContent = formatRp((data.total_tax || 0) + (data.total_service || 0));
+        document.getElementById("stat-discount").textContent = formatRp(data.total_discount || 0);
+      } catch (e) {}
+    }
+
+    async function fetchTables() {
+      try {
+        tables = await api('/api/tables');
+        renderTables();
+      } catch (e) {}
+    }
+
+    async function fetchActiveOrders() {
+      try {
+        activeOrders = await api('/api/orders?status=active');
+        renderActiveOrders();
+      } catch (e) {}
+    }
+
+    async function fetchCategories() {
+      try {
+        categories = await api('/api/categories');
+        renderCategories();
+      } catch (e) {}
+    }
+
+    async function fetchProducts() {
+      try {
+        let url = '/api/products';
+        const params = new URLSearchParams();
+        if (activeCategoryFilter !== 'Semua') {
+          const cat = categories.find(c => c.name === activeCategoryFilter);
+          if (cat) params.append('category_id', cat.id);
+        }
+        if (searchQuery.trim()) {
+          params.append('q', searchQuery.trim());
+        }
+        if (params.toString()) url += `?${params.toString()}`;
+        menu = await api(url);
+        renderMenu();
+      } catch (e) {}
+    }
+
+    async function fetchPaymentMethods() {
+      try {
+        paymentMethods = await api('/api/payment-methods');
+        renderPaymentOptions();
+      } catch (e) {}
+    }
+
+    async function fetchCurrentShift() {
+      try {
+        const res = await api('/api/shifts/current');
+        currentShift = res.shift;
+        const shiftCash = currentShift ? currentShift.expected_cash : 0;
+        document.getElementById("stat-shift-cash").textContent = formatRp(shiftCash);
+      } catch (e) {}
+    }
+
+    async function fetchAlerts() {
+      try {
+        const data = await api('/api/dashboard/alerts');
+        notifications = [];
+
+        (data.online_orders || []).forEach(o => {
+          notifications.push({
+            id: `ord-${o.id}`,
+            title: "Pesanan Online Masuk",
+            message: `${o.order_no} (${o.platform ? o.platform.toUpperCase() : 'Delivery'}) - ${formatRp(o.total)}`,
+            time: new Date(o.opened_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+            type: "info"
+          });
+        });
+
+        (data.low_stock || []).forEach(p => {
+          if (p.stock === 0 || !p.is_available) {
+            notifications.push({
+              id: `prod-${p.id}`,
+              title: "Stok Habis",
+              message: `${p.name} telah habis / tidak tersedia`,
+              time: "Saat ini",
+              type: "danger"
+            });
+          } else {
+            notifications.push({
+              id: `prod-${p.id}`,
+              title: "Stok Menipis",
+              message: `${p.name} tersisa ${p.stock} porsi`,
+              time: "Saat ini",
+              type: "warning"
+            });
+          }
+        });
+
+        renderNotifications();
+      } catch (e) {}
+    }
+
+    async function fetchRecentTransactions() {
+      try {
+        const list = await api('/api/dashboard/recent-transactions?limit=10');
+        renderTransactions(list);
+      } catch (e) {}
+    }
+
+    async function fetchReports() {
+      try {
+        const [payStats, bestSellers, hourly] = await Promise.all([
+          api('/api/dashboard/payment-methods'),
+          api('/api/dashboard/best-sellers'),
+          api('/api/dashboard/hourly')
+        ]);
+        renderPaymentStats(payStats);
+        renderBestSellers(bestSellers);
+        renderHourlyChart(hourly);
+      } catch (e) {}
+    }
+
+    // ---------- RENDER VIEWS ----------
+
+    // 1. Tables View
+    function renderTables() {
+      const container = document.getElementById("tables-container");
+      container.innerHTML = "";
+
+      tables.forEach(tbl => {
+        const div = document.createElement("div");
+        div.className = `table-box ${tbl.status}`;
+        
+        let statusText = "Kosong";
+        if (tbl.status === "terisi") statusText = "Terisi";
+        if (tbl.status === "menunggu_bayar") statusText = "Menunggu Bayar";
+        if (tbl.status === "reservasi") statusText = "Reservasi";
+
+        let amountText = "";
+        if (tbl.active_order_total) {
+          amountText = formatRp(tbl.active_order_total);
+        }
+
+        div.innerHTML = `
+          <div class="table-name">${tbl.code}</div>
+          <div class="table-status">${statusText}</div>
+          ${amountText ? `<div class="table-amount">${amountText}</div>` : `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Kps: ${tbl.capacity}</div>`}
+        `;
+
+        div.onclick = () => handleTableClick(tbl);
+        container.appendChild(div);
+      });
+    }
+
+    async function handleTableClick(tbl) {
+      if (tbl.status === "kosong") {
+        currentOrder = {
+          id: null,
+          order_no: null,
+          target: tbl.code,
+          table_id: tbl.id,
+          type: "dine_in",
+          platform: null,
+          customer_name: null,
+          items: [],
+          discountPercent: 0,
+          paymentMethod: "Tunai",
+          paymentMethodId: 1
+        };
+        switchTab("menu");
+        renderOrderPanel();
+        showToast(`Memulai pesanan baru untuk ${tbl.code}`);
+      } else if (tbl.active_order_id) {
+        try {
+          const ord = await api(`/api/orders/${tbl.active_order_id}`);
+          loadOrderToPanel(ord);
+          showToast(`Membuka pesanan ${ord.order_no} (${tbl.code})`);
+        } catch (e) {}
+      } else if (tbl.status === "reservasi") {
+        showToast(`${tbl.code}: Meja telah direservasi`);
+      }
+    }
+
+    // 2. Active Orders
+    function renderActiveOrders() {
+      const container = document.getElementById("active-orders-container");
+      document.getElementById("active-orders-count").textContent = `${activeOrders.length} Pesanan Aktif`;
+      container.innerHTML = "";
+
+      if (activeOrders.length === 0) {
+        container.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:20px;">Tidak ada pesanan aktif saat ini.</div>`;
+        return;
+      }
+
+      activeOrders.forEach(ord => {
+        const row = document.createElement("div");
+        row.className = "order-card-row";
+        
+        let typeBadgeColor = "var(--info)";
+        let targetLabel = ord.table_code || ord.order_type;
+        if (ord.order_type === 'delivery') {
+          typeBadgeColor = "#16a34a";
+          targetLabel = `${ord.platform ? ord.platform.toUpperCase() : 'Delivery'} ${ord.customer_name ? `(${ord.customer_name})` : ''}`;
+        } else if (ord.order_type === 'take_away') {
+          typeBadgeColor = "var(--warning)";
+          targetLabel = `Take Away ${ord.customer_name ? `(${ord.customer_name})` : ''}`;
+        }
+
+        const timeStr = ord.opened_at ? new Date(ord.opened_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '';
+
+        row.innerHTML = `
+          <div class="order-row-info">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-weight:700;font-size:13px;">#${ord.order_no}</span>
+              <span class="order-badge-type" style="background:${typeBadgeColor};color:#fff;">${targetLabel}</span>
+              <span style="font-size:11px;color:var(--text-muted);">(${timeStr})</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);">${ord.items ? ord.items.length : 0} item • Total: <strong style="color:var(--text-main);">${formatRp(ord.total)}</strong></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <select class="btn btn-subtle btn-sm" style="font-size:11px;padding:3px 6px;" onchange="handleOrderStatusChange(${ord.id}, this.value)">
+              <option value="baru" ${ord.status==='baru'?'selected':''}>Baru</option>
+              <option value="diproses" ${ord.status==='diproses'?'selected':''}>Dapur</option>
+              <option value="siap_saji" ${ord.status==='siap_saji'?'selected':''}>Siap Saji</option>
+              <option value="belum_dibayar" ${ord.status==='belum_dibayar'?'selected':''}>Belum Bayar</option>
+              <option value="hold" ${ord.status==='hold'?'selected':''}>Hold</option>
+            </select>
+            <button class="btn btn-subtle btn-sm" title="Simulasi Split Bill" onclick="openSplitBillModal(${ord.id})">Split</button>
+            <button class="btn btn-primary btn-sm" onclick="fetchAndLoadOrder(${ord.id})">Buka</button>
+          </div>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    async function handleOrderStatusChange(ordId, newStatus) {
+      try {
+        await api(`/api/orders/${ordId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: newStatus })
+        });
+        showToast(`Status pesanan berhasil diperbarui`);
+        fetchActiveOrders();
+        fetchTables();
+      } catch (e) {}
+    }
+
+    async function fetchAndLoadOrder(ordId) {
+      try {
+        const ord = await api(`/api/orders/${ordId}`);
+        loadOrderToPanel(ord);
+        showToast(`Pesanan #${ord.order_no} dimuat ke panel kasir`);
+      } catch (e) {}
+    }
+
+    function loadOrderToPanel(ord) {
+      let targetLabel = ord.table_code || "Pesanan";
+      if (ord.order_type === 'delivery') targetLabel = `${ord.platform ? ord.platform.toUpperCase() : 'Delivery'} (${ord.customer_name || ''})`;
+      if (ord.order_type === 'take_away') targetLabel = `Take Away (${ord.customer_name || ''})`;
+
+      currentOrder = {
+        id: ord.id,
+        order_no: ord.order_no,
+        target: targetLabel,
+        table_id: ord.table_id,
+        type: ord.order_type,
+        platform: ord.platform,
+        customer_name: ord.customer_name,
+        items: (ord.items || []).map(i => ({
+          itemId: i.id,
+          product_id: i.product_id,
+          name: i.product_name,
+          price: Number(i.price),
+          qty: Number(i.qty),
+          note: i.note || ""
+        })),
+        discountPercent: Number(ord.discount_percent) || 0,
+        paymentMethod: "Tunai",
+        paymentMethodId: 1
+      };
+      renderOrderPanel();
+    }
+
+    // 3. Categories & Menu View
+    function renderCategories() {
+      const container = document.getElementById("category-pills");
+      container.innerHTML = `<button class="pill-btn ${activeCategoryFilter === 'Semua' ? 'active' : ''}" onclick="filterCategory('Semua')">Semua</button>`;
+      categories.forEach(cat => {
+        const btn = document.createElement("button");
+        btn.className = `pill-btn ${activeCategoryFilter === cat.name ? 'active' : ''}`;
+        btn.textContent = cat.name;
+        btn.onclick = () => filterCategory(cat.name);
+        container.appendChild(btn);
+      });
+    }
+
+    function filterCategory(cat) {
+      activeCategoryFilter = cat;
+      renderCategories();
+      fetchProducts();
+    }
+
+    function handleMenuSearch(val) {
+      searchQuery = val;
+      fetchProducts();
+    }
+
+    const MENU_EMOJIS = {
+      1: "🍛", 2: "🍜", 3: "🍗", 4: "🍢", 5: "🍲", 6: "🥗", 7: "🥩",
+      8: "🧊", 9: "🍊", 10: "☕", 11: "🥑", 12: "💧", 13: "🍧", 14: "🍌", 15: "🥞"
+    };
+
+    const DEFAULT_MENU_IMAGES = {
+      1: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=400&q=80",
+      2: "https://images.unsplash.com/photo-1612927601601-6638404737ce?auto=format&fit=crop&w=400&q=80",
+      3: "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=400&q=80",
+      4: "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=400&q=80",
+      5: "https://images.unsplash.com/photo-1547928576-a4a33237cbc3?auto=format&fit=crop&w=400&q=80",
+      6: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80",
+      7: "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=400&q=80",
+      8: "https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&w=400&q=80",
+      9: "https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=400&q=80",
+      10: "https://images.unsplash.com/photo-1517256064527-09c73fc73e38?auto=format&fit=crop&w=400&q=80",
+      11: "https://images.unsplash.com/photo-1553530666-ba11a7da3888?auto=format&fit=crop&w=400&q=80",
+      12: "https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=400&q=80",
+      13: "https://images.unsplash.com/photo-1563805042-7684c019e1cb?auto=format&fit=crop&w=400&q=80",
+      14: "https://images.unsplash.com/photo-1587132137056-bfbf0166836e?auto=format&fit=crop&w=400&q=80",
+      15: "https://images.unsplash.com/photo-1506084868230-bb9d95c24759?auto=format&fit=crop&w=400&q=80"
+    };
+
+    function renderMenu() {
+      const grid = document.getElementById("menu-grid-container");
+      grid.innerHTML = "";
+
+      if (menu.length === 0) {
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text-muted);font-size:13px;">Tidak ada menu yang sesuai.</div>`;
+        return;
+      }
+
+      menu.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "menu-item-card";
+
+        let stockBadge = "";
+        if (item.stock === 0 || !item.is_available) {
+          stockBadge = `<span class="badge-stock" style="background:var(--danger);color:#fff;">Habis</span>`;
+        } else if (item.stock <= item.low_stock_threshold) {
+          stockBadge = `<span class="badge-stock" style="background:var(--warning);color:#fff;">Sisa ${item.stock}</span>`;
+        } else {
+          stockBadge = `<span class="badge-stock" style="background:var(--success);color:#fff;">Stok ${item.stock}</span>`;
+        }
+
+        const imgSrc = item.image_url || DEFAULT_MENU_IMAGES[item.id] || DEFAULT_MENU_IMAGES[((item.id - 1) % 15) + 1];
+        const emoji = MENU_EMOJIS[item.id] || '🍽️';
+
+        card.innerHTML = `
+          <div class="menu-img-wrap" id="img-wrap-${item.id}">
+            <img src="${imgSrc}" alt="${item.name}" loading="lazy" onerror="handleImageFallback(${item.id}, '${emoji}')">
+            ${stockBadge}
+          </div>
+          <div class="menu-info">
+            <div class="menu-title">${item.name}</div>
+            <div class="menu-price">${formatRp(item.price)}</div>
+            <div class="menu-actions">
+              <span style="font-size:10px;color:var(--text-muted);">${item.category_name || ''}</span>
+              <button class="btn btn-subtle btn-sm" style="font-size:10px;padding:2px 6px;" onclick="event.stopPropagation(); toggleSoldOut(${item.id}, ${item.is_available})">
+                ${item.is_available ? 'Set Habis' : 'Tersedia'}
+              </button>
+            </div>
+          </div>
+        `;
+
+        card.onclick = () => addItemToOrder(item);
+        grid.appendChild(card);
+      });
+    }
+
+    function handleImageFallback(itemId, emoji) {
+      const wrap = document.getElementById(`img-wrap-${itemId}`);
+      if (wrap) {
+        wrap.innerHTML = `<div class="menu-fallback" style="background:#ea580c;">${emoji || '🍽️'}</div>`;
+      }
+    }
+
+    async function toggleSoldOut(itemId, currentAvailable) {
+      try {
+        await api(`/api/products/${itemId}/availability`, {
+          method: 'PATCH',
+          body: JSON.stringify({ is_available: currentAvailable ? 0 : 1 })
+        });
+        showToast("Ketersediaan menu diperbarui");
+        fetchProducts();
+        fetchAlerts();
+      } catch (e) {}
+    }
+
+    // 4. Cart / Order Panel Logic
+    async function addItemToOrder(item) {
+      if (item.stock <= 0 || !item.is_available) {
+        showToast(`Menu ${item.name} sedang habis!`);
+        return;
+      }
+
+      // If active order in DB
+      if (currentOrder.id) {
+        try {
+          await api(`/api/orders/${currentOrder.id}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ product_id: item.id, qty: 1 })
+          });
+          const updated = await api(`/api/orders/${currentOrder.id}`);
+          loadOrderToPanel(updated);
+          showToast(`+1 ${item.name}`);
+          fetchTables();
+          fetchActiveOrders();
+        } catch (e) {}
+        return;
+      }
+
+      // Local new order draft
+      const existing = currentOrder.items.find(i => i.product_id === item.id);
+      if (existing) {
+        if (existing.qty >= item.stock) {
+          showToast(`Batas stok tercapai (${item.stock})`);
+          return;
+        }
+        existing.qty += 1;
+      } else {
+        currentOrder.items.push({
+          product_id: item.id,
+          name: item.name,
+          price: Number(item.price),
+          qty: 1,
+          note: ""
+        });
+      }
+
+      renderOrderPanel();
+      showToast(`+1 ${item.name}`);
+    }
+
+    async function changeItemQty(idx, delta) {
+      const it = currentOrder.items[idx];
+      if (!it) return;
+
+      if (currentOrder.id && it.itemId) {
+        try {
+          const newQty = it.qty + delta;
+          await api(`/api/orders/${currentOrder.id}/items/${it.itemId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ qty: newQty })
+          });
+          const updated = await api(`/api/orders/${currentOrder.id}`);
+          loadOrderToPanel(updated);
+          fetchTables();
+          fetchActiveOrders();
+        } catch (e) {}
+        return;
+      }
+
+      // Local draft
+      const newQty = it.qty + delta;
+      if (newQty <= 0) {
+        currentOrder.items.splice(idx, 1);
+      } else {
+        it.qty = newQty;
+      }
+      renderOrderPanel();
+    }
+
+    function updateItemNote(idx, note) {
+      if (currentOrder.items[idx]) {
+        currentOrder.items[idx].note = note;
+      }
+    }
+
+    function renderOrderPanel() {
+      document.getElementById("panel-order-title").textContent = currentOrder.order_no ? `Pesanan #${currentOrder.order_no}` : "Pesanan Baru";
+      document.getElementById("panel-order-subtitle").textContent = `${currentOrder.target} • ${currentOrder.type === 'dine_in' ? 'Dine-in' : (currentOrder.type === 'delivery' ? 'Delivery' : 'Take Away')}`;
+
+      const listContainer = document.getElementById("order-items-list");
+      listContainer.innerHTML = "";
+
+      if (currentOrder.items.length === 0) {
+        listContainer.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:40px;">Belum ada item dipilih.<br>Klik menu untuk menambahkan.</div>`;
+      } else {
+        currentOrder.items.forEach((it, idx) => {
+          const row = document.createElement("div");
+          row.className = "order-item-row";
+          row.innerHTML = `
+            <div class="order-item-main">
+              <div style="font-size:12px;font-weight:700;">${it.name}</div>
+              <div style="font-size:12px;font-weight:700;">${formatRp(it.price * it.qty)}</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-size:11px;color:var(--text-muted);">${formatRp(it.price)}</div>
+              <div class="qty-controls">
+                <button class="qty-btn" onclick="changeItemQty(${idx}, -1)">-</button>
+                <span style="font-size:12px;font-weight:700;width:20px;text-align:center;">${it.qty}</span>
+                <button class="qty-btn" onclick="changeItemQty(${idx}, 1)">+</button>
+              </div>
+            </div>
+            <input type="text" class="item-note-input" placeholder="Catatan (cth: jangan pedas)..." value="${it.note || ''}" onchange="updateItemNote(${idx}, this.value)">
+          `;
+          listContainer.appendChild(row);
+        });
+      }
+
+      // Calculations
+      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
+      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
+      const taxable = Math.max(0, subtotal - discountVal);
+      const tax = Math.round(taxable * 0.10);
+      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
+      const grandTotal = taxable + tax + service;
+
+      document.getElementById("calc-subtotal").textContent = formatRp(subtotal);
+      document.getElementById("calc-discount").textContent = `- ${formatRp(discountVal)}`;
+      document.getElementById("calc-tax").textContent = formatRp(tax);
+      document.getElementById("calc-service").textContent = formatRp(service);
+      document.getElementById("calc-total").textContent = formatRp(grandTotal);
+
+      document.getElementById("input-discount-percent").value = currentOrder.discountPercent || 0;
+
+      // Payment toggles
+      document.querySelectorAll(".pay-btn-opt").forEach(btn => {
+        btn.classList.toggle("active", btn.textContent === currentOrder.paymentMethod);
+      });
+
+      document.getElementById("cash-input-group").style.display = currentOrder.paymentMethod === "Tunai" ? "block" : "none";
+      calculateChange();
+    }
+
+    function renderPaymentOptions() {
+      const container = document.getElementById("payment-options-container");
+      container.innerHTML = "";
+      paymentMethods.forEach(pm => {
+        const div = document.createElement("div");
+        div.className = `pay-btn-opt ${pm.name === currentOrder.paymentMethod ? 'active' : ''}`;
+        div.textContent = pm.name;
+        div.onclick = () => setPaymentMethod(pm.name, pm.id);
+        container.appendChild(div);
+      });
+    }
+
+    function setPaymentMethod(name, id) {
+      currentOrder.paymentMethod = name;
+      currentOrder.paymentMethodId = id;
+      renderOrderPanel();
+    }
+
+    function calculateChange() {
+      if (currentOrder.paymentMethod !== "Tunai") return;
+      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
+      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
+      const taxable = Math.max(0, subtotal - discountVal);
+      const tax = Math.round(taxable * 0.10);
+      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
+      const grandTotal = taxable + tax + service;
+
+      const received = parseFloat(document.getElementById("input-cash-received").value) || 0;
+      const change = received - grandTotal;
+      const el = document.getElementById("calc-change");
+      if (change >= 0) {
+        el.textContent = `Kembali: ${formatRp(change)}`;
+        el.style.color = "var(--success)";
+      } else {
+        el.textContent = `Kurang: ${formatRp(Math.abs(change))}`;
+        el.style.color = "var(--danger)";
+      }
+    }
+
+    function quickCash(opt) {
+      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
+      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
+      const taxable = Math.max(0, subtotal - discountVal);
+      const tax = Math.round(taxable * 0.10);
+      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
+      const grandTotal = taxable + tax + service;
+
+      const input = document.getElementById("input-cash-received");
+      if (opt === "exact") {
+        input.value = grandTotal;
+      } else {
+        input.value = opt;
+      }
+      calculateChange();
+    }
+
+    function handleDiscountChange(val) {
+      const num = parseFloat(val) || 0;
+      if (num > 20) {
+        requestSupervisorAuth("Diskon di atas 20% memerlukan otorisasi supervisor.", (pinResult) => {
+          currentOrder.discountPercent = num;
+          currentOrder.authPin = pinResult.pin;
+          renderOrderPanel();
+          showToast(`Diskon ${num}% disetujui`);
+        }, () => {
+          document.getElementById("input-discount-percent").value = currentOrder.discountPercent || 0;
+        });
+      } else {
+        currentOrder.discountPercent = Math.max(0, num);
+        currentOrder.authPin = null;
+        renderOrderPanel();
+      }
+    }
+
+    function resetCurrentOrder() {
+      currentOrder = {
+        id: null,
+        order_no: null,
+        target: "Meja 01",
+        table_id: null,
+        type: "dine_in",
+        platform: null,
+        customer_name: null,
+        items: [],
+        discountPercent: 0,
+        paymentMethod: "Tunai",
+        paymentMethodId: 1
+      };
+      document.getElementById("input-cash-received").value = "";
+      renderOrderPanel();
+    }
+
+    // Hold order
+    async function holdCurrentOrder() {
+      if (currentOrder.items.length === 0) {
+        showToast("Tidak ada item untuk di-hold!");
+        return;
+      }
+
+      try {
+        let orderId = currentOrder.id;
+        if (!orderId) {
+          // Create new order first
+          const newOrd = await api('/api/orders', {
+            method: 'POST',
+            body: JSON.stringify({
+              order_type: currentOrder.type,
+              table_id: currentOrder.table_id,
+              platform: currentOrder.platform,
+              customer_name: currentOrder.customer_name,
+              discount_percent: currentOrder.discountPercent,
+              items: currentOrder.items.map(i => ({ product_id: i.product_id, qty: i.qty, note: i.note }))
+            })
+          });
+          orderId = newOrd.id;
+        }
+
+        // Set status to hold
+        await api(`/api/orders/${orderId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'hold' })
+        });
+
+        showToast(`Pesanan #${currentOrder.order_no || orderId} disimpan (Hold)`);
+        resetCurrentOrder();
+        fetchActiveOrders();
+        fetchTables();
+      } catch (e) {}
+    }
+
+    // Process Payment
+    async function processPayment() {
+      if (currentOrder.items.length === 0) {
+        showToast("Tambahkan menu terlebih dahulu!");
+        return;
+      }
+
+      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
+      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
+      const taxable = Math.max(0, subtotal - discountVal);
+      const tax = Math.round(taxable * 0.10);
+      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
+      const grandTotal = taxable + tax + service;
+
+      let cashReceived = grandTotal;
+      if (currentOrder.paymentMethod === "Tunai") {
+        cashReceived = parseFloat(document.getElementById("input-cash-received").value) || 0;
+        if (cashReceived < grandTotal) {
+          showToast("Nominal uang tunai belum mencukupi!");
+          return;
+        }
+      }
+
+      try {
+        let orderId = currentOrder.id;
+        if (!orderId) {
+          // Create order first
+          const created = await api('/api/orders', {
+            method: 'POST',
+            body: JSON.stringify({
+              order_type: currentOrder.type,
+              table_id: currentOrder.table_id,
+              platform: currentOrder.platform,
+              customer_name: currentOrder.customer_name,
+              discount_percent: currentOrder.discountPercent,
+              items: currentOrder.items.map(i => ({ product_id: i.product_id, qty: i.qty, note: i.note }))
+            })
+          });
+          orderId = created.id;
+        }
+
+        const payPayload = {
+          payments: [{
+            payment_method_id: currentOrder.paymentMethodId || 1,
+            amount: cashReceived,
+            reference_no: currentOrder.paymentMethod !== "Tunai" ? `${currentOrder.paymentMethod}-${Date.now().toString().slice(-6)}` : null
+          }],
+          discount_percent: currentOrder.discountPercent,
+          auth_pin: currentOrder.authPin || null
+        };
+
+        const payRes = await api(`/api/orders/${orderId}/pay`, {
+          method: 'POST',
+          body: JSON.stringify(payPayload)
+        });
+
+        // Print receipt
+        const fullOrder = await api(`/api/orders/${orderId}`);
+        printReceipt(fullOrder, cashReceived, payRes.change);
+
+        showToast(`Pembayaran #${fullOrder.order_no} berhasil!`);
+        resetCurrentOrder();
+
+        // Refresh live data
+        fetchAllData();
+      } catch (e) {}
+    }
+
+    // Print Receipt
+    function printReceipt(order, cashReceived = 0, change = 0) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+      let targetLabel = order.table_code || order.order_type;
+      if (order.order_type === 'delivery') targetLabel = `${order.platform ? order.platform.toUpperCase() : 'Delivery'} (${order.customer_name || ''})`;
+      if (order.order_type === 'take_away') targetLabel = `Take Away (${order.customer_name || ''})`;
+
+      const method = (order.payments && order.payments[0]) ? order.payments[0].payment_method_name : currentOrder.paymentMethod;
+
+      document.getElementById("receipt-meta").innerHTML = `
+        <div>No: ${order.order_no} / ${targetLabel}</div>
+        <div>Tgl: ${now.toLocaleDateString('id-ID')} ${timeStr} WIB</div>
+        <div>Kasir: ${currentUser ? currentUser.name : 'Kasir'}</div>
+        <div>Metode: ${method}</div>
+      `;
+
+      let itemsHtml = "";
+      (order.items || []).forEach(it => {
+        itemsHtml += `
+          <div style="display:flex;justify-content:space-between;margin:2px 0;">
+            <span>${it.product_name || it.name} x${it.qty}</span>
+            <span>${formatRp(it.price * it.qty)}</span>
+          </div>
+          ${it.note ? `<div style="font-size:9px;color:#555;">* ${it.note}</div>` : ''}
+        `;
+      });
+      document.getElementById("receipt-items-list").innerHTML = itemsHtml;
+
+      document.getElementById("receipt-totals").innerHTML = `
+        <div style="display:flex;justify-content:space-between;"><span>Subtotal:</span><span>${formatRp(order.subtotal)}</span></div>
+        ${order.discount_amount ? `<div style="display:flex;justify-content:space-between;"><span>Diskon (${order.discount_percent}%):</span><span>-${formatRp(order.discount_amount)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;"><span>PB1 (10%):</span><span>${formatRp(order.tax_amount)}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span>Service (5%):</span><span>${formatRp(order.service_amount)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:12px;margin:4px 0;"><span>TOTAL:</span><span>${formatRp(order.total)}</span></div>
+        ${method === 'Tunai' ? `
+          <div style="display:flex;justify-content:space-between;"><span>Tunai Diterima:</span><span>${formatRp(cashReceived)}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span>Kembali:</span><span>${formatRp(change)}</span></div>
+        ` : ''}
+      `;
+
+      setTimeout(() => {
+        window.print();
+      }, 250);
+    }
+
+    // 5. Transactions & Void
+    function renderTransactions(list) {
+      const tbody = document.getElementById("transactions-table-body");
+      tbody.innerHTML = "";
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Belum ada riwayat transaksi</td></tr>`;
+        return;
+      }
+
+      list.forEach(trx => {
+        const tr = document.createElement("tr");
+        let targetText = trx.table_code || trx.order_type;
+        if (trx.order_type === 'delivery') targetText = `${trx.platform ? trx.platform.toUpperCase() : 'Delivery'}`;
+        if (trx.order_type === 'take_away') targetText = `Take Away`;
+
+        const timeStr = trx.closed_at ? new Date(trx.closed_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-';
+
+        tr.innerHTML = `
+          <td><strong>${trx.order_no}</strong></td>
+          <td>${targetText}</td>
+          <td>${timeStr}</td>
+          <td><span class="order-badge-type" style="background:var(--bg-subtle);color:var(--text-main);">${trx.payment_method}</span></td>
+          <td><strong>${formatRp(trx.total)}</strong></td>
+          <td><span style="color:${trx.status==='selesai'?'var(--success)':'var(--danger)'};font-weight:700;">${trx.status === 'selesai' ? 'Selesai' : 'Dibatalkan'}</span></td>
+          <td>
+            <button class="btn btn-subtle btn-sm" onclick="reprintReceipt(${trx.id})">Cetak</button>
+            ${trx.status === 'selesai' ? `<button class="btn btn-danger btn-sm" onclick="requestVoidTransaction(${trx.id}, '${trx.order_no}')">Void</button>` : ''}
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function reprintReceipt(ordId) {
+      try {
+        const ord = await api(`/api/orders/${ordId}`);
+        printReceipt(ord, ord.total, 0);
+      } catch (e) {}
+    }
+
+    function requestVoidTransaction(ordId, orderNo) {
+      requestSupervisorAuth(`Batalkan (Void) transaksi #${orderNo}? Tindakan ini memerlukan PIN Supervisor.`, async (authRes) => {
+        try {
+          await api(`/api/orders/${ordId}/void`, {
+            method: 'POST',
+            body: JSON.stringify({
+              reason: "Dibatalkan melalui dashboard",
+              pin: authRes.pin
+            })
+          });
+          showToast(`Transaksi #${orderNo} berhasil di-void!`);
+          fetchAllData();
+        } catch (e) {}
+      });
+    }
+
+    // 6. Reports View
+    function renderPaymentStats(stats) {
+      const container = document.getElementById("payment-methods-bars");
+      container.innerHTML = "";
+
+      let allSum = 0;
+      stats.forEach(s => allSum += Number(s.total));
+
+      const colors = {
+        Tunai: "var(--success)",
+        QRIS: "var(--info)",
+        Kartu: "var(--primary)",
+        "E-wallet": "var(--warning)"
+      };
+
+      stats.forEach(item => {
+        const amount = Number(item.total);
+        const pct = allSum > 0 ? Math.round((amount / allSum) * 100) : 0;
+        const row = document.createElement("div");
+        row.className = "pay-bar-row";
+        row.innerHTML = `
+          <div class="pay-bar-label">
+            <span>${item.name}</span>
+            <span>${formatRp(amount)} (${pct}%)</span>
+          </div>
+          <div class="pay-bar-track">
+            <div class="pay-bar-fill" style="width:${pct}%;background:${colors[item.name] || 'var(--primary)'};"></div>
+          </div>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function renderBestSellers(list) {
+      const tbody = document.getElementById("top-sellers-table");
+      tbody.innerHTML = "";
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Belum ada data penjualan tercatat hari ini.</td></tr>`;
+        return;
+      }
+
+      list.forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><strong>#${idx + 1}</strong></td>
+          <td><strong>${item.name}</strong></td>
+          <td><span style="font-size:11px;color:var(--text-muted);">${item.category || ''}</span></td>
+          <td>${item.qty} Porsi</td>
+          <td><strong>${formatRp(item.revenue)}</strong></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderHourlyChart(hours) {
+      const container = document.getElementById("hourly-chart-bars");
+      container.innerHTML = "";
+
+      const maxVal = Math.max(...hours.map(h => h.val), 1);
+
+      hours.forEach(item => {
+        const pct = Math.round((item.val / maxVal) * 100);
+        const col = document.createElement("div");
+        col.className = "chart-col";
+        col.title = `${item.h}: ${formatRp(item.val)}`;
+        col.innerHTML = `
+          <div class="chart-bar ${item.peak ? 'peak' : ''}" style="height:${Math.max(4, pct)}%;"></div>
+          <span class="chart-col-label">${item.h.split(":")[0]}</span>
+        `;
+        container.appendChild(col);
+      });
+    }
+
+    // 7. Supervisor Auth Modal
+    function requestSupervisorAuth(reasonText, onSuccess, onCancel) {
+      document.getElementById("pin-reason-text").textContent = reasonText || "Masukkan PIN supervisor.";
+      document.getElementById("supervisor-pin-input").value = "";
+      pendingSupervisorAction = { onSuccess, onCancel };
+      openModal("modal-supervisor-pin");
+      document.getElementById("supervisor-pin-input").focus();
+    }
+
+    async function verifySupervisorPin() {
+      const pin = document.getElementById("supervisor-pin-input").value.trim();
+      if (!pin) {
+        showToast("Masukkan PIN terlebih dahulu!");
+        return;
+      }
+
+      try {
+        const res = await api('/api/verify-pin', {
+          method: 'POST',
+          body: JSON.stringify({ pin })
+        });
+
+        if (res.ok) {
+          closeModal("modal-supervisor-pin");
+          if (pendingSupervisorAction && pendingSupervisorAction.onSuccess) {
+            pendingSupervisorAction.onSuccess({ pin, authorized_by: res.authorized_by });
+          }
+        }
+      } catch (err) {
+        document.getElementById("supervisor-pin-input").value = "";
+      }
+    }
+
+    // 8. New Order Modal
+    function openNewOrderModal() {
+      selectedOrderTypeChoice = "dine_in";
+      selectedOrderTypeLabel = "Dine-in";
+      selectedPlatform = null;
+
+      const sel = document.getElementById("modal-select-table");
+      sel.innerHTML = "";
+      
+      const availableTables = tables.filter(t => t.status === "kosong");
+      if (availableTables.length === 0) {
+        sel.innerHTML = `<option value="">Semua Meja Penuh</option>`;
+      } else {
+        availableTables.forEach(t => {
+          sel.innerHTML += `<option value="${t.id}" data-code="${t.code}">${t.code} (Kapasitas ${t.capacity} orang)</option>`;
+        });
+      }
+
+      selectOrderType("dine_in", "Dine-in");
+      openModal("modal-new-order");
+    }
+
+    function selectOrderType(type, label, platform = null) {
+      selectedOrderTypeChoice = type;
+      selectedOrderTypeLabel = label;
+      selectedPlatform = platform;
+
+      const isDineIn = type === "dine_in";
+      document.getElementById("select-table-wrap").style.display = isDineIn ? "block" : "none";
+      document.getElementById("customer-name-wrap").style.display = isDineIn ? "none" : "block";
+
+      document.querySelectorAll("#modal-new-order .btn-subtle").forEach(b => b.classList.remove("btn-primary"));
+      if (type === 'dine_in') document.getElementById("type-opt-dinein").classList.add("btn-primary");
+      if (type === 'take_away') document.getElementById("type-opt-takeaway").classList.add("btn-primary");
+      if (platform === 'gofood') document.getElementById("type-opt-gofood").classList.add("btn-primary");
+      if (platform === 'grabfood') document.getElementById("type-opt-grabfood").classList.add("btn-primary");
+    }
+
+    function confirmNewOrder() {
+      let targetName = selectedOrderTypeLabel;
+      let tableId = null;
+
+      if (selectedOrderTypeChoice === "dine_in") {
+        const sel = document.getElementById("modal-select-table");
+        tableId = sel.value;
+        if (!tableId) {
+          showToast("Pilih meja terlebih dahulu!");
+          return;
+        }
+        const opt = sel.options[sel.selectedIndex];
+        targetName = opt ? opt.getAttribute("data-code") : "Meja";
+      }
+
+      const custName = document.getElementById("modal-customer-name").value.trim();
+
+      currentOrder = {
+        id: null,
+        order_no: null,
+        target: targetName,
+        table_id: tableId ? Number(tableId) : null,
+        type: selectedOrderTypeChoice,
+        platform: selectedPlatform,
+        customer_name: custName || null,
+        items: [],
+        discountPercent: 0,
+        paymentMethod: "Tunai",
+        paymentMethodId: 1
+      };
+
+      closeModal("modal-new-order");
+      switchTab("menu");
+      renderOrderPanel();
+      showToast(`Memulai pesanan baru (${targetName})`);
+    }
+
+    // 9. Split Bill Modal
+    function openSplitBillModal(ordId) {
+      const ord = activeOrders.find(o => o.id === ordId);
+      if (!ord) return;
+
+      document.getElementById("split-bill-info").textContent = `Pesanan #${ord.order_no} (${ord.table_code || ord.order_type}) - Total: ${formatRp(ord.total)}`;
+      document.getElementById("split-bill-info").dataset.total = ord.total;
+      calculateSplit(2);
+      openModal("modal-split-bill");
+    }
+
+    function calculateSplit(people) {
+      const total = parseFloat(document.getElementById("split-bill-info").dataset.total) || 0;
+      const perPerson = Math.ceil(total / people);
+      document.getElementById("split-result-box").innerHTML = `
+        Dibagi ${people} Orang:<br>
+        <strong style="font-size:18px;color:var(--primary);">${formatRp(perPerson)}</strong> / orang
+      `;
+    }
+
+    // 10. Shift Modal
+    async function openShiftModal() {
+      await fetchCurrentShift();
+      if (!currentShift) {
+        document.getElementById("shift-closed-section").style.display = "block";
+        document.getElementById("shift-open-section").style.display = "none";
+      } else {
+        document.getElementById("shift-closed-section").style.display = "none";
+        document.getElementById("shift-open-section").style.display = "block";
+
+        document.getElementById("shift-modal-opening").textContent = formatRp(currentShift.opening_cash);
+        document.getElementById("shift-modal-cash-in").textContent = formatRp(currentShift.cash_in_payments + currentShift.cash_move_in);
+        document.getElementById("shift-modal-cash-out").textContent = formatRp(currentShift.cash_move_out);
+        document.getElementById("shift-modal-expected").textContent = formatRp(currentShift.expected_cash);
+        document.getElementById("shift-actual-cash-input").value = "";
+      }
+      openModal("modal-shift");
+    }
+
+    async function executeOpenShift() {
+      const openCash = parseFloat(document.getElementById("shift-open-cash-input").value) || 0;
+      try {
+        await api('/api/shifts/open', {
+          method: 'POST',
+          body: JSON.stringify({ opening_cash: openCash })
+        });
+        showToast("Shift kasir baru berhasil dibuka!");
+        closeModal("modal-shift");
+        fetchAllData();
+      } catch (e) {}
+    }
+
+    async function recordCashExpense() {
+      const note = document.getElementById("shift-expense-note").value.trim();
+      const amt = parseFloat(document.getElementById("shift-expense-amount").value) || 0;
+      if (!note || amt <= 0) {
+        showToast("Isi keterangan dan nominal pengeluaran!");
+        return;
+      }
+
+      try {
+        await api('/api/shifts/cash-movement', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'out', amount: amt, reason: note })
+        });
+        document.getElementById("shift-expense-note").value = "";
+        document.getElementById("shift-expense-amount").value = "";
+        showToast("Pengeluaran kas dicatat");
+        openShiftModal();
+        fetchSummary();
+      } catch (e) {}
+    }
+
+    function executeCloseShift() {
+      const actual = parseFloat(document.getElementById("shift-actual-cash-input").value);
+      if (isNaN(actual)) {
+        showToast("Masukkan nominal hitungan uang fisik di laci!");
+        return;
+      }
+
+      const expected = currentShift ? currentShift.expected_cash : 0;
+      const diff = actual - expected;
+      let diffMsg = `Selisih Pas (${formatRp(0)})`;
+      if (diff > 0) diffMsg = `Lebih: +${formatRp(diff)}`;
+      if (diff < 0) diffMsg = `Kurang: -${formatRp(Math.abs(diff))}`;
+
+      requestSupervisorAuth(`Tutup shift kasir sekarang? ${diffMsg}`, async () => {
+        try {
+          await api('/api/shifts/close', {
+            method: 'POST',
+            body: JSON.stringify({ actual_cash: actual })
+          });
+          alert(`Shift Kasir Resmi Ditutup!\nTotal Kas Diterima: ${formatRp(actual)}\nStatus: ${diffMsg}\nLaporan shift telah disimpan.`);
+          closeModal("modal-shift");
+          fetchAllData();
+          showToast("Shift kasir telah ditutup");
+        } catch (e) {}
+      });
+    }
+
+    // 11. Notifications
+    function renderNotifications() {
+      const container = document.getElementById("notif-list-container");
+      document.getElementById("notif-badge").textContent = notifications.length;
+      container.innerHTML = "";
+
+      if (notifications.length === 0) {
+        container.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:10px;font-size:11px;">Tidak ada notifikasi baru</div>`;
+        return;
+      }
+
+      notifications.forEach(n => {
+        const item = document.createElement("div");
+        item.className = "notif-item";
+        let icon = "🔔";
+        if (n.type === "warning") icon = "⚠️";
+        if (n.type === "danger") icon = "🚨";
+        item.innerHTML = `
+          <div>${icon}</div>
+          <div style="flex:1;">
+            <div style="font-weight:700;">${n.title}</div>
+            <div style="color:var(--text-muted);">${n.message}</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${n.time}</div>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function clearNotifications() {
+      notifications = [];
+      renderNotifications();
+    }
+
+    // 12. Tabs & Navigation
+    function switchTab(tabId) {
+      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+      document.querySelectorAll("[id^='tab-pane-']").forEach(pane => pane.style.display = "none");
+      
+      const targetPane = document.getElementById(`tab-pane-${tabId}`);
+      if (targetPane) targetPane.style.display = "flex";
+
+      const btns = document.querySelectorAll(".tab-btn");
+      if (tabId === "meja") btns[0].classList.add("active");
+      if (tabId === "menu") btns[1].classList.add("active");
+      if (tabId === "laporan") {
+        btns[2].classList.add("active");
+        fetchReports();
+      }
+      if (tabId === "transaksi") {
+        btns[3].classList.add("active");
+        fetchRecentTransactions();
+      }
+    }
+
+    function openModal(id) {
+      document.getElementById(id).classList.add("open");
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove("open");
+    }
+
+    // Event Listeners
+    document.getElementById("btn-theme-toggle").onclick = () => {
+      document.documentElement.classList.toggle("theme-dark");
+      const isDark = document.documentElement.classList.contains("theme-dark");
+      document.getElementById("btn-theme-toggle").textContent = isDark ? "☀️" : "🌙";
+    };
+
+    document.getElementById("btn-notif-toggle").onclick = (e) => {
+      e.stopPropagation();
+      document.getElementById("notif-dropdown").classList.toggle("open");
+    };
+
+    document.addEventListener("click", () => {
+      document.getElementById("notif-dropdown").classList.remove("open");
+    });
+
+    document.getElementById("notif-dropdown").onclick = (e) => e.stopPropagation();
+
+    // ---------- APP INIT & POLLING ----------
+    function initApp() {
+      if (!authToken) {
+        openModal("modal-login");
+        return;
+      }
+
+      updateUserProfileHeader();
+      startClock();
+      fetchAllData();
+
+      // Poll active orders, tables, summary every 15 seconds
+      if (pollingInterval) clearInterval(pollingInterval);
+      pollingInterval = setInterval(() => {
+        if (authToken) {
+          fetchActiveOrders();
+          fetchTables();
+          fetchSummary();
+          fetchAlerts();
+        }
+      }, 15000);
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      initApp();
+    });
+  </script>
+</body>
+</html>
