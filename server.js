@@ -72,7 +72,7 @@ async function buildOrderItems(conn, items, priceSnapshot = new Map()) {
 
   const productIds = [...new Set(lines.map(l => l.product_id))];
   const [products] = await conn.query(
-    'SELECT id, name, price, stock, is_available FROM products WHERE id IN (?)',
+    'SELECT id, name, price, stock, is_available, is_active FROM products WHERE id IN (?)',
     [productIds]
   );
   const prodMap = new Map(products.map(p => [p.id, p]));
@@ -82,6 +82,9 @@ async function buildOrderItems(conn, items, priceSnapshot = new Map()) {
   for (const [productId, totalQty] of qtyByProduct) {
     const prod = prodMap.get(productId);
     if (!prod) throw new Error(`Produk ID ${productId} tidak ditemukan`);
+    // A menu deactivated in "Kelola Menu" can not be newly added. A line that is already on this order
+    // (it has a price snapshot) stays valid, so held/open orders can still be resumed and paid.
+    if (!prod.is_active && !priceSnapshot.has(productId)) throw new Error(`Menu ${prod.name} sudah dinonaktifkan`);
     if (prod.stock < totalQty) throw new Error(`Stok ${prod.name} tidak mencukupi (sisa ${prod.stock})`);
   }
 
@@ -192,6 +195,91 @@ async function applyOrderStock(conn, items, direction, { orderId, userId, note }
     }
   }
   return lowStock;
+}
+
+// ---------- MENU ADMIN HELPERS ----------
+
+const ADMIN_ROLES = ['admin', 'supervisor'];
+const MAX_PRICE = 100000000;
+const MAX_LOW_STOCK_THRESHOLD = 1000;
+
+// Route guard: only the given roles (read from the JWT in req.user) may pass
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Hanya admin atau supervisor yang dapat mengelola menu' });
+    }
+    next();
+  };
+}
+const requireAdmin = requireRole(...ADMIN_ROLES);
+
+// Validates and normalises the body of POST/PUT /api/admin/products. Throws HttpError(400).
+// image_url: undefined = not provided (edit keeps the current one), null = clear it, string = new link.
+// low_stock_threshold: null = not provided (create uses 5, edit keeps the current one).
+function parseProductInput(body, { creating }) {
+  const b = body || {};
+
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) throw new HttpError(400, 'Nama menu wajib diisi');
+  if (name.length > 100) throw new HttpError(400, 'Nama menu maksimal 100 karakter');
+
+  const categoryId = parseWholeNumber(b.category_id);
+  if (categoryId === null || categoryId < 1) throw new HttpError(400, 'Kategori wajib dipilih');
+
+  const price = parseWholeNumber(b.price);
+  if (price === null) throw new HttpError(400, 'Harga harus berupa bilangan bulat rupiah');
+  if (price < 1) throw new HttpError(400, 'Harga minimal Rp 1');
+  if (price > MAX_PRICE) throw new HttpError(400, 'Harga terlalu besar (maksimal Rp 100.000.000)');
+
+  let imageUrl;
+  if (b.image_url !== undefined) {
+    if (b.image_url !== null && typeof b.image_url !== 'string') throw new HttpError(400, 'Link foto tidak valid');
+    const link = (b.image_url || '').trim();
+    if (link.length > 500) throw new HttpError(400, 'Link foto maksimal 500 karakter');
+    if (link && !/^https?:\/\/\S+$/i.test(link)) throw new HttpError(400, 'Link foto harus diawali http:// atau https://');
+    imageUrl = link || null;
+  }
+
+  let threshold = null;
+  if (b.low_stock_threshold !== undefined && b.low_stock_threshold !== null && b.low_stock_threshold !== '') {
+    threshold = parseWholeNumber(b.low_stock_threshold);
+    if (threshold === null || threshold < 0 || threshold > MAX_LOW_STOCK_THRESHOLD) {
+      throw new HttpError(400, `Batas stok menipis harus bilangan bulat 0-${MAX_LOW_STOCK_THRESHOLD}`);
+    }
+  }
+
+  const result = { name, category_id: categoryId, price, image_url: imageUrl, low_stock_threshold: threshold };
+
+  if (creating) {
+    let stock = 0;
+    if (b.stock !== undefined && b.stock !== null && b.stock !== '') {
+      stock = parseWholeNumber(b.stock);
+      if (stock === null || stock < 0 || stock > MAX_STOCK_CHANGE) {
+        throw new HttpError(400, `Stok awal harus bilangan bulat 0-${MAX_STOCK_CHANGE.toLocaleString('id-ID')}`);
+      }
+    }
+    result.stock = stock;
+  }
+  return result;
+}
+
+// Locks the category row (so two admins can not race on the same name check) and makes sure it exists
+async function lockCategory(conn, categoryId) {
+  const [rows] = await conn.query('SELECT id FROM categories WHERE id = ? FOR UPDATE', [categoryId]);
+  if (rows.length === 0) throw new HttpError(400, 'Kategori tidak ditemukan');
+}
+
+// A menu name may appear only once per category (case-insensitive, inactive menus count too)
+async function assertUniqueProductName(conn, categoryId, name, exceptId = null) {
+  const [rows] = await conn.query(
+    'SELECT id, is_active FROM products WHERE category_id = ? AND LOWER(name) = LOWER(?) AND id <> ? LIMIT 1',
+    [categoryId, name, exceptId || 0]
+  );
+  if (rows.length === 0) return;
+  throw new HttpError(409, rows[0].is_active
+    ? `Menu "${name}" sudah ada di kategori ini`
+    : `Menu "${name}" sudah ada tetapi nonaktif. Aktifkan kembali menu tersebut.`);
 }
 
 // Generates sequential zero-padded invoice number: INV-0001
@@ -494,6 +582,192 @@ app.get('/api/products/:id/stock-movements', async (req, res) => {
   }
 });
 
+// ---------- KELOLA MENU (admin / supervisor) ----------
+
+// GET /api/admin/products -> every product, active or not
+app.get('/api/admin/products', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(`${PRODUCT_SELECT} ORDER BY c.sort_order ASC, c.id ASC, p.name ASC`);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/products { name, category_id, price, image_url?, low_stock_threshold?, stock? }
+// An initial stock above 0 is written to the stock history as a "restock" named "Stok awal".
+app.post('/api/admin/products', requireAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const input = parseProductInput(req.body, { creating: true });
+    await conn.beginTransaction();
+    await lockCategory(conn, input.category_id);
+    await assertUniqueProductName(conn, input.category_id, input.name);
+
+    const [ins] = await conn.query(
+      `INSERT INTO products (category_id, name, price, image_url, stock, low_stock_threshold)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [input.category_id, input.name, input.price, input.image_url || null, input.stock, input.low_stock_threshold ?? 5]
+    );
+    if (input.stock > 0) {
+      await insertStockMovement(conn, {
+        productId: ins.insertId, type: 'restock', qtyChange: input.stock, stockAfter: input.stock,
+        note: 'Stok awal', userId: req.user.id
+      });
+    }
+    await conn.commit();
+
+    const [rows] = await db.query(`${PRODUCT_SELECT} WHERE p.id = ?`, [ins.insertId]);
+    res.status(201).json({ ok: true, product: rows[0] });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// PUT /api/admin/products/:id { name, category_id, price, image_url, low_stock_threshold }
+// Never touches stock / is_available / is_active. Old orders keep their own name/price snapshot.
+app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const input = parseProductInput(req.body, { creating: false });
+    await conn.beginTransaction();
+    const [cur] = await conn.query(
+      'SELECT id, image_url, low_stock_threshold FROM products WHERE id = ? FOR UPDATE', [req.params.id]
+    );
+    if (cur.length === 0) throw new HttpError(404, 'Menu tidak ditemukan');
+    await lockCategory(conn, input.category_id);
+    await assertUniqueProductName(conn, input.category_id, input.name, cur[0].id);
+
+    await conn.query(
+      `UPDATE products SET name = ?, category_id = ?, price = ?, image_url = ?, low_stock_threshold = ? WHERE id = ?`,
+      [
+        input.name, input.category_id, input.price,
+        input.image_url === undefined ? cur[0].image_url : input.image_url,
+        input.low_stock_threshold ?? cur[0].low_stock_threshold,
+        cur[0].id
+      ]
+    );
+    await conn.commit();
+
+    const [rows] = await db.query(`${PRODUCT_SELECT} WHERE p.id = ?`, [cur[0].id]);
+    res.json({ ok: true, product: rows[0] });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// PATCH /api/admin/products/:id/active { is_active: boolean } -> "delete" = deactivate, idempotent
+app.patch('/api/admin/products/:id/active', requireAdmin, async (req, res) => {
+  try {
+    const isActive = req.body && req.body.is_active;
+    if (typeof isActive !== 'boolean') throw new HttpError(400, 'is_active harus true atau false');
+    const [found] = await db.query('SELECT id FROM products WHERE id = ?', [req.params.id]);
+    if (found.length === 0) throw new HttpError(404, 'Menu tidak ditemukan');
+
+    await db.query('UPDATE products SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, found[0].id]);
+    const [rows] = await db.query(`${PRODUCT_SELECT} WHERE p.id = ?`, [found[0].id]);
+    res.json({ ok: true, product: rows[0] });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ---- categories ----
+
+function parseCategoryName(body) {
+  const name = body && typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, 'Nama kategori wajib diisi');
+  if (name.length > 50) throw new HttpError(400, 'Nama kategori maksimal 50 karakter');
+  return name;
+}
+
+// categories.name is UNIQUE (case-insensitive collation): a clash surfaces as ER_DUP_ENTRY
+function sendCategoryError(res, err) {
+  if (err && err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Nama kategori sudah dipakai' });
+  res.status(err.status || 500).json({ error: err.message });
+}
+
+// POST /api/admin/categories { name } -> appended after the last category
+app.post('/api/admin/categories', requireAdmin, async (req, res) => {
+  try {
+    const name = parseCategoryName(req.body);
+    const [[last]] = await db.query('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM categories');
+    const [ins] = await db.query('INSERT INTO categories (name, sort_order) VALUES (?, ?)', [name, last.next]);
+    res.status(201).json({ ok: true, category: { id: ins.insertId, name, sort_order: last.next } });
+  } catch (err) {
+    sendCategoryError(res, err);
+  }
+});
+
+// PUT /api/admin/categories/order { ids: [...] } -> new order; must list every category exactly once.
+// (Registered before /:id so "order" is not read as an id.)
+app.put('/api/admin/categories/order', requireAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const raw = req.body && req.body.ids;
+    if (!Array.isArray(raw) || raw.length === 0) throw new HttpError(400, 'Daftar urutan kategori tidak valid');
+    const ids = raw.map(parseWholeNumber);
+    if (ids.some(id => id === null)) throw new HttpError(400, 'Daftar urutan kategori tidak valid');
+
+    await conn.beginTransaction();
+    const [rows] = await conn.query('SELECT id FROM categories FOR UPDATE');
+    const existing = new Set(rows.map(r => r.id));
+    if (ids.length !== existing.size || new Set(ids).size !== ids.length || ids.some(id => !existing.has(id))) {
+      throw new HttpError(400, 'Urutan harus memuat semua kategori tepat satu kali');
+    }
+    for (let i = 0; i < ids.length; i++) {
+      await conn.query('UPDATE categories SET sort_order = ? WHERE id = ?', [i + 1, ids[i]]);
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    await conn.rollback();
+    sendCategoryError(res, err);
+  } finally {
+    conn.release();
+  }
+});
+
+// PUT /api/admin/categories/:id { name }
+app.put('/api/admin/categories/:id', requireAdmin, async (req, res) => {
+  try {
+    const name = parseCategoryName(req.body);
+    const [found] = await db.query('SELECT id, sort_order FROM categories WHERE id = ?', [req.params.id]);
+    if (found.length === 0) throw new HttpError(404, 'Kategori tidak ditemukan');
+    await db.query('UPDATE categories SET name = ? WHERE id = ?', [name, found[0].id]);
+    res.json({ ok: true, category: { id: found[0].id, name, sort_order: found[0].sort_order } });
+  } catch (err) {
+    sendCategoryError(res, err);
+  }
+});
+
+// DELETE /api/admin/categories/:id -> only when it holds no menu at all (inactive menus count)
+app.delete('/api/admin/categories/:id', requireAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    // same lock that menu create/edit takes, so a menu can not be added while we count
+    const [found] = await conn.query('SELECT id FROM categories WHERE id = ? FOR UPDATE', [req.params.id]);
+    if (found.length === 0) throw new HttpError(404, 'Kategori tidak ditemukan');
+    const [[count]] = await conn.query('SELECT COUNT(*) AS n FROM products WHERE category_id = ?', [found[0].id]);
+    if (count.n > 0) throw new HttpError(409, `Kategori masih berisi ${count.n} menu`);
+    await conn.query('DELETE FROM categories WHERE id = ?', [found[0].id]);
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    await conn.rollback();
+    sendCategoryError(res, err);
+  } finally {
+    conn.release();
+  }
+});
+
 // GET /api/tables
 app.get('/api/tables', async (req, res) => {
   try {
@@ -758,9 +1032,15 @@ app.post('/api/orders/:id/items', async (req, res) => {
       throw new Error('Pesanan sudah selesai atau dibatalkan');
     }
 
-    const [products] = await conn.query('SELECT id, name, price, stock FROM products WHERE id = ?', [product_id]);
+    const [products] = await conn.query('SELECT id, name, price, stock, is_active FROM products WHERE id = ?', [product_id]);
     if (products.length === 0) throw new Error('Produk tidak ditemukan');
     const prod = products[0];
+
+    // Same rule as buildOrderItems: a deactivated menu can only be topped up if it is already on this order
+    if (!prod.is_active) {
+      const [onOrder] = await conn.query('SELECT id FROM order_items WHERE order_id = ? AND product_id = ? LIMIT 1', [orderId, prod.id]);
+      if (onOrder.length === 0) throw new Error(`Menu ${prod.name} sudah dinonaktifkan`);
+    }
 
     // Check if same item & note exists
     const [existing] = await conn.query(

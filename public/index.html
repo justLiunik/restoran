@@ -132,6 +132,17 @@
     .field-error { font-size: 11px; font-weight: 600; color: var(--danger); min-height: 15px; margin: 2px 0 6px; }
     .modal-field-label { display: block; font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
     .modal-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--bg-card); color: var(--text-main); }
+    /* Kelola Menu */
+    .btn-touch { padding: 8px 12px; font-size: 12px; min-height: 34px; justify-content: center; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .mm-row-inactive { opacity: 0.6; }
+    .cat-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .cat-move { display: flex; gap: 4px; }
+    .cat-name { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+    .cat-count { font-size: 11px; color: var(--text-muted); }
+    .mf-image-preview { width: 72px; height: 72px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 10px; text-align: center; color: var(--text-muted); background: var(--bg-subtle); flex-shrink: 0; }
+    .mf-image-preview img { width: 100%; height: 100%; object-fit: cover; }
+    .mf-image-preview .menu-fallback { font-size: 28px; }
     .stock-row { cursor: pointer; }
     .stock-row.selected td { background: var(--primary-subtle); }
     .mv-plus { color: var(--success); font-weight: 700; }
@@ -326,6 +337,7 @@
         <button class="tab-btn" onclick="switchTab('laporan')">📊 Penjualan & Laporan</button>
         <button class="tab-btn" onclick="switchTab('transaksi')">🧾 Riwayat Transaksi</button>
         <button class="tab-btn" onclick="switchTab('stok')">📦 Kelola Stok</button>
+        <button class="tab-btn" id="tab-btn-kelolamenu" style="display:none;" onclick="switchTab('kelolamenu')">🛠️ Kelola Menu</button>
       </div>
 
       <!-- TAB 1: MEJA & PESANAN AKTIF -->
@@ -444,6 +456,48 @@
             </thead>
             <tbody id="stock-history-body"></tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- TAB 6: KELOLA MENU (admin / supervisor) -->
+      <div id="tab-pane-kelolamenu" style="display:none;flex-direction:column;gap:16px;">
+        <div class="card">
+          <div class="card-title-bar">
+            <div>
+              <div class="card-title">🛠️ Kelola Menu</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="mm-summary">Memuat...</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+              <button class="btn btn-subtle btn-touch" onclick="openCategoriesModal()">🗂️ Kategori</button>
+              <button class="btn btn-primary btn-touch" onclick="openMenuForm()">+ Tambah Menu</button>
+            </div>
+          </div>
+          <div class="menu-filter-bar">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <select class="modal-input" id="mm-category-filter" style="width:auto;min-width:150px;" aria-label="Filter kategori"
+                onchange="setMenuAdminFilter('category', this.value)"></select>
+              <label style="font-size:12px;display:inline-flex;gap:6px;align-items:center;cursor:pointer;">
+                <input type="checkbox" id="mm-show-inactive" onchange="setMenuAdminFilter('inactive', this.checked)"> Tampilkan nonaktif
+              </label>
+            </div>
+            <input type="text" class="search-box" id="mm-search" placeholder="Cari menu..." oninput="setMenuAdminFilter('search', this.value)">
+          </div>
+          <table class="table-responsive" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>Menu</th>
+                <th>Kategori</th>
+                <th>Harga</th>
+                <th>Stok</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="mm-table-body"></tbody>
+          </table>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+            Stok diatur di tab Kelola Stok. "Nonaktifkan" menyembunyikan menu dari kasir; riwayat transaksi dan pesanan yang sedang berjalan tidak berubah.
+          </div>
         </div>
       </div>
 
@@ -639,6 +693,81 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
         <button class="btn btn-subtle" onclick="closeModal('modal-correction')">Batal</button>
         <button class="btn btn-primary" id="btn-correct-save" onclick="submitCorrection()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TAMBAH / UBAH MENU -->
+  <div class="modal-overlay" id="modal-menu-form">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="card-title" id="mf-title" style="margin-bottom:4px;">➕ Tambah Menu</div>
+
+      <label class="modal-field-label" for="mf-name">Nama Menu</label>
+      <input type="text" class="modal-input" id="mf-name" maxlength="100" placeholder="cth: Nasi Goreng Spesial" autocomplete="off"
+        onchange="updateMenuImagePreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();submitMenuForm();}">
+
+      <label class="modal-field-label" for="mf-category">Kategori</label>
+      <select class="modal-input" id="mf-category"></select>
+
+      <label class="modal-field-label" for="mf-price">Harga (Rp)</label>
+      <input type="number" class="modal-input" id="mf-price" min="1" step="1" inputmode="numeric" placeholder="cth: 25000"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitMenuForm();}">
+
+      <label class="modal-field-label" for="mf-image">Link Foto (opsional)</label>
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <div class="mf-image-preview" id="mf-image-preview"></div>
+        <div style="flex:1;min-width:0;">
+          <input type="text" class="modal-input" id="mf-image" maxlength="500" placeholder="https://..." autocomplete="off"
+            onchange="updateMenuImagePreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();updateMenuImagePreview();}">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Tempel alamat gambar (diawali http:// atau https://). Kosongkan untuk memakai kotak huruf.</div>
+        </div>
+      </div>
+
+      <label class="modal-field-label" for="mf-threshold">Batas Stok Menipis</label>
+      <input type="number" class="modal-input" id="mf-threshold" min="0" step="1" inputmode="numeric"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitMenuForm();}">
+
+      <div id="mf-stock-wrap">
+        <label class="modal-field-label" for="mf-stock">Stok Awal</label>
+        <input type="number" class="modal-input" id="mf-stock" min="0" step="1" inputmode="numeric" value="0"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();submitMenuForm();}">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Stok 0 membuat menu tampil "Habis" sampai di-restock. Stok awal tercatat di riwayat stok.</div>
+      </div>
+
+      <div class="field-error" id="mf-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-menu-form')">Batal</button>
+        <button class="btn btn-primary btn-touch" id="mf-save" onclick="submitMenuForm()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: KELOLA KATEGORI -->
+  <div class="modal-overlay" id="modal-categories">
+    <div class="modal-card" style="max-width:460px;">
+      <div class="card-title" style="margin-bottom:4px;">🗂️ Kelola Kategori</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Urutan di sini menjadi urutan tombol kategori di Katalog Menu. Kategori hanya bisa dihapus jika tidak berisi menu (termasuk menu nonaktif).</div>
+      <div id="cat-list"></div>
+      <div style="display:flex;gap:6px;margin-top:12px;">
+        <input type="text" class="modal-input" id="cat-new-name" maxlength="50" placeholder="Nama kategori baru..." autocomplete="off"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();addCategory();}">
+        <button class="btn btn-primary btn-touch" onclick="addCategory()">Tambah</button>
+      </div>
+      <div class="field-error" id="cat-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-categories')">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: KONFIRMASI UMUM -->
+  <div class="modal-overlay" id="modal-confirm">
+    <div class="modal-card" style="max-width:380px;">
+      <div class="card-title" id="confirm-title" style="margin-bottom:6px;">Konfirmasi</div>
+      <div style="font-size:13px;color:var(--text-main);overflow-wrap:anywhere;" id="confirm-message"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+        <button class="btn btn-subtle btn-touch" onclick="answerConfirm(false)">Batal</button>
+        <button class="btn btn-primary btn-touch" id="confirm-ok" onclick="answerConfirm(true)">Ya</button>
       </div>
     </div>
   </div>
@@ -959,6 +1088,7 @@
       document.getElementById("header-user-avatar").textContent = currentUser.name.charAt(0).toUpperCase();
       document.getElementById("header-user-name").textContent = currentUser.name;
       document.getElementById("header-user-role").textContent = `${currentUser.role.toUpperCase()} (Keluar ↗)`;
+      applyRoleUi();
     }
 
     // ---------- DATA FETCHING ----------
@@ -1388,19 +1518,20 @@
         const markedNote = (hasStock && status === "habis")
           ? `<div class="menu-stock-note">Stok ${item.stock} • ditandai habis</div>` : "";
 
-        const imgSrc = item.image_url || DEFAULT_MENU_IMAGES[item.id] || DEFAULT_MENU_IMAGES[((item.id - 1) % 15) + 1];
-        const emoji = MENU_EMOJIS[item.id] || '🍽️';
+        const imgSrc = menuImageSrc(item);
 
         card.innerHTML = `
           <div class="menu-img-wrap" id="img-wrap-${item.id}">
-            <img src="${imgSrc}" alt="${item.name}" loading="lazy" onerror="handleImageFallback(${item.id}, '${emoji}')">
+            ${imgSrc
+              ? `<img src="${esc(imgSrc)}" alt="${esc(item.name)}" loading="lazy" onerror="handleImageFallback(${item.id})">`
+              : placeholderHtml(item)}
             ${stockBadge}
           </div>
           <div class="menu-info">
-            <div class="menu-title">${item.name}</div>
+            <div class="menu-title">${esc(item.name)}</div>
             <div class="menu-price">${formatRp(item.price)}</div>
             <div class="menu-actions">
-              <span class="menu-cat-line">${item.category_name || ''}</span>
+              <span class="menu-cat-line">${esc(item.category_name || '')}</span>
               ${markedNote}
               <div class="menu-btn-row">${restockBtn}${toggleBtn}</div>
             </div>
@@ -1412,11 +1543,30 @@
       });
     }
 
-    function handleImageFallback(itemId, emoji) {
+    // Photo of a menu card: its own link, else the bundled picture for the 15 seeded menus (ids 1-15), else none
+    // (a menu added in "Kelola Menu" without a photo gets a placeholder, never another dish's picture).
+    function menuImageSrc(item) {
+      if (item.image_url) return item.image_url;
+      const id = Number(item.id);
+      return id >= 1 && id <= 15 ? DEFAULT_MENU_IMAGES[id] : null;
+    }
+
+    const PLACEHOLDER_COLORS = ["#ea580c", "#0d9488", "#7c3aed", "#2563eb", "#db2777", "#65a30d", "#d97706", "#0891b2"];
+
+    // Seeded menus keep their emoji; any other menu gets a coloured box with the first letter of its name
+    function placeholderHtml(item) {
+      const id = Number(item.id) || 0;
+      if (MENU_EMOJIS[id]) return `<div class="menu-fallback" style="background:#ea580c;">${MENU_EMOJIS[id]}</div>`;
+      const letter = (String(item.name || "").trim().charAt(0) || "?").toUpperCase();
+      const color = PLACEHOLDER_COLORS[(id || letter.charCodeAt(0)) % PLACEHOLDER_COLORS.length];
+      return `<div class="menu-fallback" style="background:${color};">${esc(letter)}</div>`;
+    }
+
+    // A photo that fails to load is swapped for the placeholder (the stock badge stays)
+    function handleImageFallback(itemId) {
       const wrap = document.getElementById(`img-wrap-${itemId}`);
-      if (wrap) {
-        wrap.innerHTML = `<div class="menu-fallback" style="background:#ea580c;">${emoji || '🍽️'}</div>`;
-      }
+      const img = wrap && wrap.querySelector("img");
+      if (img) img.outerHTML = placeholderHtml(productStock[itemId] || { id: itemId, name: "" });
     }
 
     // "Tandai Habis" / "Aktifkan Kembali": only for products that really have stock
@@ -2436,7 +2586,8 @@
     const MOVEMENT_LABEL = { restock: "Restock", correction: "Koreksi", sale: "Penjualan", void_restore: "Void (stok kembali)" };
 
     // Strict whole-number check: rejects empty, decimals, negatives and text with a clear message
-    function parseStockInput(raw, { min, label = "Jumlah", badInput = false }) {
+    // (Also used by Kelola Menu for price / initial stock / low-stock threshold, with its own `max`.)
+    function parseStockInput(raw, { min, max = MAX_STOCK_INPUT, label = "Jumlah", badInput = false }) {
       const s = String(raw ?? "").trim();
       if (badInput) return { error: `${label} harus berupa angka` };
       if (s === "") return { error: `${label} wajib diisi` };
@@ -2445,7 +2596,7 @@
       if (!/^\d+$/.test(s)) return { error: `${label} harus berupa angka` };
       const n = parseInt(s, 10);
       if (n < min) return { error: min === 1 ? `${label} minimal 1` : `${label} tidak boleh kurang dari ${min}` };
-      if (n > MAX_STOCK_INPUT) return { error: `${label} terlalu besar (maksimal ${MAX_STOCK_INPUT.toLocaleString("id-ID")})` };
+      if (n > max) return { error: `${label} terlalu besar (maksimal ${max.toLocaleString("id-ID")})` };
       return { value: n };
     }
 
@@ -2714,6 +2865,383 @@
       } catch (e) {}
     }
 
+    // ---------- KELOLA MENU (admin / supervisor) ----------
+    // The server enforces the role too (403 for kasir); this only decides what is shown.
+    const MENU_MANAGER_ROLES = ["admin", "supervisor"];
+    const MAX_MENU_PRICE = 100000000;
+    const MAX_THRESHOLD_INPUT = 1000;
+    let menuAdminProducts = [];
+    let menuAdminFilter = { category: "", search: "", inactive: false };
+    let menuFormProductId = null; // null = adding a new menu
+    let menuFormBusy = false;
+    let catBusy = false;
+    let catEditId = null;
+    let confirmResolve = null;
+
+    function canManageMenu() {
+      return !!currentUser && MENU_MANAGER_ROLES.includes(currentUser.role);
+    }
+
+    // Shows the "Kelola Menu" tab only to admin / supervisor and leaves it if the user may not be there
+    function applyRoleUi() {
+      const btn = document.getElementById("tab-btn-kelolamenu");
+      if (btn) btn.style.display = canManageMenu() ? "" : "none";
+      if (!canManageMenu() && currentTab === "kelolamenu") switchTab("meja");
+    }
+
+    // Generic yes/no dialog: resolves true on the OK button, false on Batal
+    function askConfirm({ title, message, okLabel = "Ya", danger = false }) {
+      return new Promise(resolve => {
+        if (confirmResolve) confirmResolve(false);
+        confirmResolve = resolve;
+        document.getElementById("confirm-title").textContent = title;
+        document.getElementById("confirm-message").textContent = message;
+        const ok = document.getElementById("confirm-ok");
+        ok.textContent = okLabel;
+        ok.className = `btn btn-touch ${danger ? "btn-danger" : "btn-primary"}`;
+        openModal("modal-confirm");
+        ok.focus();
+      });
+    }
+
+    function answerConfirm(yes) {
+      closeModal("modal-confirm");
+      const resolve = confirmResolve;
+      confirmResolve = null;
+      if (resolve) resolve(yes);
+    }
+
+    // Re-sync every place that shows menu data (Katalog, bell, Kelola Stok, this tab, category dialog)
+    async function afterMenuChange() {
+      await fetchCategories();
+      if (activeCategoryFilter !== "Semua" && !categories.some(c => c.name === activeCategoryFilter)) {
+        activeCategoryFilter = "Semua"; // the filtered category was renamed or deleted
+        renderCategories();
+      }
+      await Promise.all([
+        fetchProducts(),
+        fetchAlerts(),
+        fetchMenuAdmin(),
+        currentTab === "stok" ? fetchStockView() : null
+      ]);
+    }
+
+    async function fetchMenuAdmin() {
+      if (!canManageMenu()) return;
+      try {
+        menuAdminProducts = await api('/api/admin/products');
+        fillMenuAdminCategoryFilter();
+        renderMenuAdmin();
+        if (document.getElementById("modal-categories").classList.contains("open")) renderCategoriesModal();
+      } catch (e) {}
+    }
+
+    function fillMenuAdminCategoryFilter() {
+      const sel = document.getElementById("mm-category-filter");
+      sel.innerHTML = `<option value="">Semua kategori</option>` +
+        categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+      if (!categories.some(c => String(c.id) === menuAdminFilter.category)) menuAdminFilter.category = "";
+      sel.value = menuAdminFilter.category;
+    }
+
+    function setMenuAdminFilter(key, value) {
+      menuAdminFilter[key] = value;
+      renderMenuAdmin();
+    }
+
+    function renderMenuAdmin() {
+      const active = menuAdminProducts.filter(p => p.is_active).length;
+      const inactive = menuAdminProducts.length - active;
+      document.getElementById("mm-summary").textContent = `${active} menu aktif${inactive ? ` • ${inactive} nonaktif` : ""}`;
+
+      const q = menuAdminFilter.search.trim().toLowerCase();
+      const rows = menuAdminProducts.filter(p =>
+        (menuAdminFilter.inactive || p.is_active) &&
+        (!menuAdminFilter.category || String(p.category_id) === menuAdminFilter.category) &&
+        (!q || p.name.toLowerCase().includes(q)));
+
+      const tbody = document.getElementById("mm-table-body");
+      if (rows.length === 0) {
+        const msg = menuAdminProducts.length === 0 ? "Belum ada menu. Klik + Tambah Menu." : "Tidak ada menu yang sesuai.";
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">${msg}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(p => `
+        <tr class="${p.is_active ? "" : "mm-row-inactive"}">
+          <td><strong>${esc(p.name)}</strong></td>
+          <td><span style="font-size:11px;color:var(--text-muted);">${esc(p.category_name || "")}</span></td>
+          <td>${formatRp(p.price)}</td>
+          <td>${p.stock}</td>
+          <td>${p.is_active
+            ? `<span class="status-badge ok">Aktif</span>`
+            : `<span class="status-badge" style="background:var(--text-muted);">Nonaktif</span>`}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-subtle btn-touch" onclick="openMenuForm(${p.id})">Ubah</button>
+            <button class="btn btn-subtle btn-touch" onclick="toggleMenuActive(${p.id}, ${p.is_active ? "false" : "true"})">${p.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
+          </td>
+        </tr>`).join("");
+    }
+
+    // ---- Tambah / Ubah Menu ----
+    function openMenuForm(productId) {
+      const p = productId ? menuAdminProducts.find(x => x.id === productId) : null;
+      if (productId && !p) return;
+      if (categories.length === 0) {
+        showToast("Buat kategori dulu sebelum menambah menu");
+        openCategoriesModal();
+        return;
+      }
+      menuFormProductId = p ? p.id : null;
+      menuFormBusy = false;
+      document.getElementById("mf-save").disabled = false;
+      document.getElementById("mf-title").textContent = p ? "✏️ Ubah Menu" : "➕ Tambah Menu";
+
+      const sel = document.getElementById("mf-category");
+      sel.innerHTML = categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+      sel.value = String(p ? p.category_id : (menuAdminFilter.category || categories[0].id));
+
+      document.getElementById("mf-name").value = p ? p.name : "";
+      document.getElementById("mf-price").value = p ? Math.round(Number(p.price)) : "";
+      document.getElementById("mf-image").value = p && p.image_url ? p.image_url : "";
+      document.getElementById("mf-threshold").value = p ? p.low_stock_threshold : 5;
+      document.getElementById("mf-stock").value = "0";
+      document.getElementById("mf-stock-wrap").style.display = p ? "none" : "block";
+      document.getElementById("mf-error").textContent = "";
+      updateMenuImagePreview();
+      openModal("modal-menu-form");
+      document.getElementById("mf-name").focus();
+    }
+
+    // Small preview of what the menu card will show (own link, bundled picture, or the placeholder)
+    function updateMenuImagePreview() {
+      const box = document.getElementById("mf-image-preview");
+      const url = document.getElementById("mf-image").value.trim();
+      const id = menuFormProductId || 0;
+      const lostPhoto = `onerror="this.outerHTML='Foto tidak dapat dimuat'"`;
+      if (url && !/^https?:\/\/\S+$/i.test(url)) {
+        box.textContent = "Link tidak valid";
+        return;
+      }
+      const src = url || menuImageSrc({ id, image_url: "" });
+      box.innerHTML = src
+        ? `<img src="${esc(src)}" alt="" ${lostPhoto}>`
+        : placeholderHtml({ id, name: document.getElementById("mf-name").value });
+    }
+
+    // Reads and validates the dialog: { value } for the request body or { error, field }
+    function readMenuForm() {
+      const num = (id, opts) => {
+        const el = document.getElementById(id);
+        return parseStockInput(el.value, { ...opts, badInput: el.validity.badInput });
+      };
+
+      const name = document.getElementById("mf-name").value.trim();
+      if (!name) return { error: "Nama menu wajib diisi", field: "mf-name" };
+      if (name.length > 100) return { error: "Nama menu maksimal 100 karakter", field: "mf-name" };
+
+      const categoryId = Number(document.getElementById("mf-category").value);
+      if (!categoryId) return { error: "Kategori wajib dipilih", field: "mf-category" };
+
+      const price = num("mf-price", { min: 1, max: MAX_MENU_PRICE, label: "Harga" });
+      if (price.error) return { error: price.error, field: "mf-price" };
+
+      const image = document.getElementById("mf-image").value.trim();
+      if (image.length > 500) return { error: "Link foto maksimal 500 karakter", field: "mf-image" };
+      if (image && !/^https?:\/\/\S+$/i.test(image)) {
+        return { error: "Link foto harus diawali http:// atau https://", field: "mf-image" };
+      }
+
+      const threshold = num("mf-threshold", { min: 0, max: MAX_THRESHOLD_INPUT, label: "Batas stok menipis" });
+      if (threshold.error) return { error: threshold.error, field: "mf-threshold" };
+
+      const body = { name, category_id: categoryId, price: price.value, image_url: image, low_stock_threshold: threshold.value };
+      if (menuFormProductId === null) {
+        const stock = num("mf-stock", { min: 0, label: "Stok awal" });
+        if (stock.error) return { error: stock.error, field: "mf-stock" };
+        body.stock = stock.value;
+      }
+      return { value: body };
+    }
+
+    async function submitMenuForm() {
+      if (menuFormBusy) return;
+      const errEl = document.getElementById("mf-error");
+      errEl.textContent = "";
+      const r = readMenuForm();
+      if (r.error) {
+        errEl.textContent = r.error;
+        document.getElementById(r.field).focus();
+        return;
+      }
+
+      menuFormBusy = true;
+      const btn = document.getElementById("mf-save");
+      btn.disabled = true;
+      const editing = menuFormProductId !== null;
+      try {
+        const res = await api(editing ? `/api/admin/products/${menuFormProductId}` : '/api/admin/products', {
+          method: editing ? 'PUT' : 'POST',
+          body: JSON.stringify(r.value)
+        });
+        closeModal("modal-menu-form");
+        showToast(editing ? `Menu ${res.product.name} diperbarui` : `Menu ${res.product.name} ditambahkan`);
+        afterMenuChange();
+      } catch (e) {
+        errEl.textContent = e.message; // e.g. duplicate name; the dialog stays open
+      } finally {
+        menuFormBusy = false;
+        btn.disabled = false;
+      }
+    }
+
+    async function toggleMenuActive(productId, makeActive) {
+      const p = menuAdminProducts.find(x => x.id === productId);
+      if (!p) return;
+      if (!makeActive) {
+        const ok = await askConfirm({
+          title: "Nonaktifkan menu?",
+          message: `"${p.name}" tidak akan muncul lagi di kasir. Pesanan yang sedang berjalan dan riwayat transaksi tidak terpengaruh. Menu bisa diaktifkan kembali kapan saja.`,
+          okLabel: "Nonaktifkan",
+          danger: true
+        });
+        if (!ok) return;
+      }
+      try {
+        await api(`/api/admin/products/${productId}/active`, {
+          method: 'PATCH',
+          body: JSON.stringify({ is_active: makeActive })
+        });
+        showToast(makeActive ? `Menu ${p.name} diaktifkan kembali` : `Menu ${p.name} dinonaktifkan`);
+        afterMenuChange();
+      } catch (e) {}
+    }
+
+    // ---- Kelola Kategori ----
+    function openCategoriesModal() {
+      catEditId = null;
+      document.getElementById("cat-error").textContent = "";
+      document.getElementById("cat-new-name").value = "";
+      renderCategoriesModal();
+      openModal("modal-categories");
+      if (menuAdminProducts.length === 0) fetchMenuAdmin(); // menu counts per category
+    }
+
+    function renderCategoriesModal() {
+      const counts = {};
+      menuAdminProducts.forEach(p => { counts[p.category_id] = (counts[p.category_id] || 0) + 1; });
+      const list = document.getElementById("cat-list");
+      if (categories.length === 0) {
+        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:14px 0;">Belum ada kategori.</div>`;
+        return;
+      }
+      list.innerHTML = categories.map((c, i) => {
+        const n = counts[c.id] || 0;
+        const move = `
+          <div class="cat-move">
+            <button class="btn btn-subtle btn-touch" aria-label="Naikkan ${esc(c.name)}" ${i === 0 ? "disabled" : ""} onclick="moveCategory(${c.id}, -1)">▲</button>
+            <button class="btn btn-subtle btn-touch" aria-label="Turunkan ${esc(c.name)}" ${i === categories.length - 1 ? "disabled" : ""} onclick="moveCategory(${c.id}, 1)">▼</button>
+          </div>`;
+        if (catEditId === c.id) {
+          return `<div class="cat-row">${move}
+            <input type="text" class="modal-input" id="cat-edit-input" maxlength="50" value="${esc(c.name)}"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();saveRenameCategory(${c.id});}else if(event.key==='Escape'){cancelRenameCategory();}">
+            <button class="btn btn-primary btn-touch" onclick="saveRenameCategory(${c.id})">Simpan</button>
+            <button class="btn btn-subtle btn-touch" onclick="cancelRenameCategory()">Batal</button>
+          </div>`;
+        }
+        return `<div class="cat-row">${move}
+          <div class="cat-name"><strong>${esc(c.name)}</strong><span class="cat-count">${n} menu</span></div>
+          <button class="btn btn-subtle btn-touch" onclick="startRenameCategory(${c.id})">Ubah</button>
+          <button class="btn btn-subtle btn-touch" ${n > 0 ? 'disabled title="Masih berisi menu"' : ""} onclick="deleteCategory(${c.id})">Hapus</button>
+        </div>`;
+      }).join("");
+    }
+
+    // Runs one category request; errors are shown inside the dialog. Returns true on success.
+    async function runCategoryAction(request, successMsg) {
+      if (catBusy) return false;
+      catBusy = true;
+      const errEl = document.getElementById("cat-error");
+      errEl.textContent = "";
+      try {
+        await request();
+        if (successMsg) showToast(successMsg);
+        await afterMenuChange();
+        return true;
+      } catch (e) {
+        errEl.textContent = e.message;
+        return false;
+      } finally {
+        catBusy = false;
+      }
+    }
+
+    async function addCategory() {
+      const input = document.getElementById("cat-new-name");
+      const name = input.value.trim();
+      const errEl = document.getElementById("cat-error");
+      if (!name) { errEl.textContent = "Nama kategori wajib diisi"; input.focus(); return; }
+      if (name.length > 50) { errEl.textContent = "Nama kategori maksimal 50 karakter"; input.focus(); return; }
+      const ok = await runCategoryAction(
+        () => api('/api/admin/categories', { method: 'POST', body: JSON.stringify({ name }) }),
+        `Kategori ${name} ditambahkan`
+      );
+      if (ok) { input.value = ""; input.focus(); }
+    }
+
+    function startRenameCategory(id) {
+      catEditId = id;
+      document.getElementById("cat-error").textContent = "";
+      renderCategoriesModal();
+      const input = document.getElementById("cat-edit-input");
+      if (input) { input.focus(); input.select(); }
+    }
+
+    function cancelRenameCategory() {
+      catEditId = null;
+      document.getElementById("cat-error").textContent = "";
+      renderCategoriesModal();
+    }
+
+    async function saveRenameCategory(id) {
+      const cat = categories.find(c => c.id === id);
+      const input = document.getElementById("cat-edit-input");
+      if (!cat || !input) return;
+      const name = input.value.trim();
+      const errEl = document.getElementById("cat-error");
+      if (!name) { errEl.textContent = "Nama kategori wajib diisi"; input.focus(); return; }
+      if (name.length > 50) { errEl.textContent = "Nama kategori maksimal 50 karakter"; input.focus(); return; }
+      if (name === cat.name) { cancelRenameCategory(); return; }
+      const ok = await runCategoryAction(
+        () => api(`/api/admin/categories/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+        `Kategori diubah menjadi ${name}`
+      );
+      if (ok) { catEditId = null; renderCategoriesModal(); }
+    }
+
+    async function moveCategory(id, direction) {
+      const ids = categories.map(c => c.id);
+      const from = ids.indexOf(id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= ids.length) return;
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      await runCategoryAction(() => api('/api/admin/categories/order', { method: 'PUT', body: JSON.stringify({ ids }) }));
+    }
+
+    async function deleteCategory(id) {
+      const cat = categories.find(c => c.id === id);
+      if (!cat) return;
+      const ok = await askConfirm({
+        title: "Hapus kategori?",
+        message: `Kategori "${cat.name}" akan dihapus permanen. Hanya kategori kosong yang bisa dihapus.`,
+        okLabel: "Hapus",
+        danger: true
+      });
+      if (!ok) return;
+      await runCategoryAction(() => api(`/api/admin/categories/${id}`, { method: 'DELETE' }), `Kategori ${cat.name} dihapus`);
+    }
+
     // 11. Notifications
     function renderNotifications() {
       const container = document.getElementById("notif-list-container");
@@ -2734,9 +3262,9 @@
         item.innerHTML = `
           <div>${icon}</div>
           <div style="flex:1;">
-            <div style="font-weight:700;">${n.title}</div>
-            <div style="color:var(--text-muted);">${n.message}</div>
-            <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${n.time}</div>
+            <div style="font-weight:700;">${esc(n.title)}</div>
+            <div style="color:var(--text-muted);">${esc(n.message)}</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${esc(n.time)}</div>
           </div>
         `;
         container.appendChild(item);
@@ -2764,7 +3292,17 @@
         fetchStockView();
       }
       if (tabId === "meja") btns[0].classList.add("active");
-      if (tabId === "menu") btns[1].classList.add("active");
+      if (tabId === "menu") {
+        btns[1].classList.add("active");
+        // pick up menu changes made meanwhile (e.g. by an admin on another device)
+        fetchCategories();
+        fetchProducts();
+      }
+      if (tabId === "kelolamenu") {
+        if (!canManageMenu()) { switchTab("meja"); return; }
+        document.getElementById("tab-btn-kelolamenu").classList.add("active");
+        fetchCategories().then(fetchMenuAdmin);
+      }
       if (tabId === "laporan") {
         btns[2].classList.add("active");
         fetchReports();

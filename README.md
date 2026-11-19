@@ -1,6 +1,6 @@
 # Kasir Restoran
 
-Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, dan dashboard penjualan.
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok dan menu, dan dashboard penjualan.
 
 **Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
@@ -194,6 +194,23 @@ Status stok: **Habis** (stok 0 atau ditandai habis), **Menipis** (stok ≤ batas
 
 Kalau database kamu dibuat sebelum fitur ini, jalankan `npm run db:migrate` sekali untuk menambah tabel riwayat stok.
 
+### Kelola Menu
+
+Tab **🛠️ Kelola Menu** hanya muncul untuk **Admin** dan **Supervisor** (kasir tidak melihatnya, dan server menolak permintaannya). Perubahan bisa dilakukan kapan saja, termasuk saat restoran sedang ramai.
+
+| Aksi | Hasilnya |
+|---|---|
+| **+ Tambah Menu** | Isi nama, kategori, harga (bilangan bulat rupiah), link foto (opsional), batas stok menipis, dan **stok awal**. Stok awal di atas 0 tercatat di riwayat stok sebagai "Stok awal". |
+| **Ubah** | Mengubah nama, kategori, harga, link foto, dan batas stok menipis. Stok tidak berubah di sini; gunakan tab Kelola Stok. |
+| **Nonaktifkan / Aktifkan** | Menu nonaktif hilang dari kasir, tapi tidak dihapus. Aktifkan lagi lewat kotak centang **Tampilkan nonaktif**. |
+| **🗂️ Kategori** | Tambah, ganti nama, atur urutan dengan tombol ▲ ▼ (urutan yang sama dipakai tombol kategori di Katalog Menu), dan hapus. Kategori hanya bisa dihapus kalau tidak berisi menu, termasuk menu nonaktif. |
+
+- **Riwayat tidak berubah.** Nama dan harga pada transaksi lama tetap seperti saat transaksi. Pesanan yang masih terbuka atau di-hold tetap memakai harga yang sudah tercatat di pesanan itu; menu yang baru ditambahkan memakai harga terbaru.
+- **Menu nonaktif aman untuk pesanan berjalan.** Pesanan yang sudah berisi menu itu tetap bisa dilanjutkan dan dibayar, tetapi menu itu tidak bisa ditambahkan ke pesanan lain.
+- Nama menu tidak boleh kembar dalam satu kategori (menu nonaktif ikut dihitung), dan nama kategori tidak boleh kembar.
+- Foto berupa **link gambar** (diawali `http://` atau `https://`). Menu tanpa foto tampil sebagai kotak berwarna dengan huruf pertama namanya.
+- Fitur ini **tidak** menambah tabel atau kolom, jadi `npm run db:migrate` tidak perlu dijalankan khusus untuknya.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -336,6 +353,7 @@ restoran/
 ├── public/index.html            # Tampilan aplikasi (frontend)
 ├── database/kasir_restoran.sql  # Skema dan data awal database (instalasi baru)
 ├── database/migrations/         # Pembaruan skema untuk database yang sudah ada
+├── docs/superpowers/            # Catatan desain (specs/) dan rencana kerja (plans/) fitur
 ├── docker-compose.yml           # Konfigurasi MySQL (dan app, profil "full")
 ├── Dockerfile                   # Image Docker untuk aplikasi
 ├── .env.example                 # Contoh pengaturan; salin menjadi .env
