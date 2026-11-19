@@ -118,22 +118,45 @@
     .menu-price { font-size: 13px; font-weight: 700; color: var(--primary); margin-top: auto; }
     .menu-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
     
-    .order-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; height: calc(100vh - 170px); position: sticky; top: 76px; box-shadow: var(--shadow); }
-    .order-header { padding: 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-    .order-items-scroll { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-    .order-item-row { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
-    .order-item-main { display: flex; justify-content: space-between; align-items: center; }
-    .qty-controls { display: flex; align-items: center; gap: 6px; }
-    .qty-btn { width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-subtle); cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; }
-    .item-note-input { width: 100%; font-size: 11px; border: none; background: var(--bg-subtle); padding: 4px 6px; border-radius: 4px; color: var(--text-main); outline: none; }
-    
-    .order-footer { padding: 14px; border-top: 1px solid var(--border); background: var(--bg-subtle); border-radius: 0 0 var(--radius) var(--radius); }
-    .calc-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; color: var(--text-muted); }
-    .calc-row.total { font-size: 16px; font-weight: 800; color: var(--text-main); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-    .payment-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0; }
-    .pay-btn-opt { border: 1px solid var(--border); padding: 6px; border-radius: 6px; font-size: 11px; font-weight: 600; text-align: center; cursor: pointer; background: var(--bg-card); }
+    /* Panel = kolom penuh: header tetap, daftar item menyerap sisa ruang (scroll), footer ringkas di bawah */
+    .order-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; height: calc(100vh - 92px); height: calc(100dvh - 92px); min-height: 460px; position: sticky; top: 76px; box-shadow: var(--shadow); overflow: hidden; }
+    .order-header { flex: 0 0 auto; padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .order-items-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 14px; display: flex; flex-direction: column; }
+    .order-item-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+    .order-item-row:last-child { border-bottom: none; }
+    .order-item-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+    .order-item-name { font-size: 13px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .order-item-total { font-size: 13px; font-weight: 700; white-space: nowrap; }
+    .order-item-sub { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .order-item-unit { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+    .note-toggle { border: none; background: none; padding: 4px 2px; font-size: 11px; font-weight: 600; color: var(--primary); cursor: pointer; }
+    .qty-controls { display: flex; align-items: center; gap: 4px; }
+    .qty-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-subtle); cursor: pointer; font-size: 18px; font-weight: bold; line-height: 1; display: flex; align-items: center; justify-content: center; touch-action: manipulation; user-select: none; }
+    .qty-btn:active { background: var(--border); }
+    .qty-val { font-size: 14px; font-weight: 700; min-width: 28px; text-align: center; }
+    @media (pointer: coarse) { .qty-btn { width: 42px; height: 42px; } }
+    .item-note-input { width: 100%; font-size: 12px; border: 1px solid var(--border); background: var(--bg-subtle); padding: 6px 8px; border-radius: 6px; color: var(--text-main); outline: none; }
+
+    .order-footer { flex: 0 0 auto; padding: 10px 14px 12px; border-top: 1px solid var(--border); background: var(--bg-subtle); }
+    .calc-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 4px; color: var(--text-muted); }
+    .calc-row.total { font-size: 17px; font-weight: 800; color: var(--text-main); margin: 0 0 6px; padding: 0; border: none; }
+    .foot-details { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); margin-bottom: 8px; }
+    .foot-details > summary { cursor: pointer; list-style: none; padding: 6px 10px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+    .foot-details > summary::-webkit-details-marker { display: none; }
+    .foot-details > summary::after { content: "▾"; font-size: 11px; color: var(--text-muted); margin-left: 6px; transition: transform 0.15s; }
+    .foot-details[open] > summary::after { transform: rotate(180deg); }
+    .foot-details-body { padding: 6px 10px 6px; border-top: 1px solid var(--border); }
+    .payment-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 8px; }
+    .pay-btn-opt { border: 1px solid var(--border); padding: 7px 4px; border-radius: 6px; font-size: 11px; font-weight: 600; text-align: center; cursor: pointer; background: var(--bg-card); }
     .pay-btn-opt.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .cash-row { display: flex; gap: 4px; align-items: stretch; }
+    .cash-row input { flex: 1 1 auto; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
     .order-btn-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 8px; }
+    .order-btn-actions .btn { justify-content: center; padding: 10px 14px; }
+    @media (max-width: 1024px) {
+      /* Tablet: panel pesanan di bawah menu, tinggi cukup supaya >= 5 item terlihat (harus setelah aturan dasar .order-panel) */
+      .order-panel { position: static; height: max(720px, calc(100vh - 32px)); height: max(720px, calc(100dvh - 32px)); }
+    }
     
     .pay-bars { display: flex; flex-direction: column; gap: 8px; }
     .pay-bar-row { display: flex; flex-direction: column; gap: 3px; }
@@ -370,48 +393,55 @@
       </div>
 
       <div class="order-footer">
-        <div class="calc-row">
-          <span>Subtotal</span>
-          <span id="calc-subtotal">Rp 0</span>
-        </div>
-        <div class="calc-row" style="align-items:center;">
-          <span>Diskon (%)</span>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <input type="number" id="input-discount-percent" value="0" min="0" max="100" style="width:48px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px;" onchange="handleDiscountChange(this.value)">
-            <span id="calc-discount" style="color:var(--danger);">- Rp 0</span>
-          </div>
-        </div>
-        <div class="calc-row">
-          <span>Pajak Resto (10%)</span>
-          <span id="calc-tax">Rp 0</span>
-        </div>
-        <div class="calc-row">
-          <span>Service Charge (5%)</span>
-          <span id="calc-service">Rp 0</span>
-        </div>
         <div class="calc-row total">
           <span>TOTAL</span>
           <span id="calc-total">Rp 0</span>
         </div>
 
-        <div style="font-size:11px;font-weight:700;margin-top:10px;">Metode Pembayaran:</div>
-        <div class="payment-options" id="payment-options-container">
+        <details class="foot-details" id="foot-details">
+          <summary>
+            <span>Rincian &amp; Diskon <span id="foot-disc-badge" style="color:var(--danger);font-weight:700;"></span></span>
+          </summary>
+          <div class="foot-details-body">
+            <div class="calc-row">
+              <span>Subtotal</span>
+              <span id="calc-subtotal">Rp 0</span>
+            </div>
+            <div class="calc-row">
+              <span>Diskon (%)</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input type="number" id="input-discount-percent" value="0" min="0" max="100" style="width:52px;padding:3px 4px;font-size:12px;border:1px solid var(--border);border-radius:4px;" onchange="handleDiscountChange(this.value)">
+                <span id="calc-discount" style="color:var(--danger);">- Rp 0</span>
+              </div>
+            </div>
+            <div class="calc-row">
+              <span>Pajak Resto (10%)</span>
+              <span id="calc-tax">Rp 0</span>
+            </div>
+            <div class="calc-row">
+              <span>Service Charge (5%)</span>
+              <span id="calc-service">Rp 0</span>
+            </div>
+          </div>
+        </details>
+
+        <div class="payment-options" id="payment-options-container" aria-label="Metode Pembayaran">
           <div class="pay-btn-opt active" onclick="setPaymentMethod('Tunai', 1)">Tunai</div>
           <div class="pay-btn-opt" onclick="setPaymentMethod('QRIS', 2)">QRIS</div>
           <div class="pay-btn-opt" onclick="setPaymentMethod('Kartu', 3)">Kartu</div>
           <div class="pay-btn-opt" onclick="setPaymentMethod('E-wallet', 4)">E-Wallet</div>
         </div>
 
-        <div id="cash-input-group" style="margin-bottom:8px;">
+        <div id="cash-input-group">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:4px;">
             <span>Uang Diterima:</span>
             <span id="calc-change" style="font-weight:700;color:var(--success);">Kembali: Rp 0</span>
           </div>
-          <input type="number" id="input-cash-received" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;" placeholder="Nominal uang..." oninput="calculateChange()">
-          <div style="display:flex;gap:4px;margin-top:4px;">
-            <button class="btn btn-subtle btn-sm" style="flex:1;font-size:10px;" onclick="quickCash('exact')">Uang Pas</button>
-            <button class="btn btn-subtle btn-sm" style="flex:1;font-size:10px;" onclick="quickCash(50000)">50.000</button>
-            <button class="btn btn-subtle btn-sm" style="flex:1;font-size:10px;" onclick="quickCash(100000)">100.000</button>
+          <div class="cash-row">
+            <input type="number" id="input-cash-received" placeholder="Nominal uang..." oninput="calculateChange()">
+            <button class="btn btn-subtle btn-sm" style="font-size:10px;" onclick="quickCash('exact')">Pas</button>
+            <button class="btn btn-subtle btn-sm" style="font-size:10px;" onclick="quickCash(50000)">50rb</button>
+            <button class="btn btn-subtle btn-sm" style="font-size:10px;" onclick="quickCash(100000)">100rb</button>
           </div>
         </div>
 
@@ -1200,6 +1230,14 @@
       renderOrderPanel();
     }
 
+    function openItemNote(idx) {
+      if (!currentOrder.items[idx]) return;
+      currentOrder.items[idx]._noteOpen = true;
+      renderOrderPanel();
+      const input = document.getElementById(`item-note-${idx}`);
+      if (input) input.focus();
+    }
+
     function updateItemNote(idx, note) {
       if (currentOrder.items[idx]) {
         currentOrder.items[idx].note = note;
@@ -1216,23 +1254,29 @@
       if (currentOrder.items.length === 0) {
         listContainer.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:40px;">Belum ada item dipilih.<br>Klik menu untuk menambahkan.</div>`;
       } else {
+        const escAttr = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+        const escText = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
         currentOrder.items.forEach((it, idx) => {
           const row = document.createElement("div");
           row.className = "order-item-row";
+          const noteOpen = !!(it.note || it._noteOpen);
           row.innerHTML = `
             <div class="order-item-main">
-              <div style="font-size:12px;font-weight:700;">${it.name}</div>
-              <div style="font-size:12px;font-weight:700;">${formatRp(it.price * it.qty)}</div>
+              <div class="order-item-name" title="${escAttr(it.name)}">${escText(it.name)}</div>
+              <div class="order-item-total">${formatRp(it.price * it.qty)}</div>
             </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <div style="font-size:11px;color:var(--text-muted);">${formatRp(it.price)}</div>
+            <div class="order-item-sub">
+              <div class="order-item-unit">
+                <span>${formatRp(it.price)}</span>
+                ${noteOpen ? "" : `<button type="button" class="note-toggle" onclick="openItemNote(${idx})">+ Catatan</button>`}
+              </div>
               <div class="qty-controls">
-                <button class="qty-btn" onclick="changeItemQty(${idx}, -1)">-</button>
-                <span style="font-size:12px;font-weight:700;width:20px;text-align:center;">${it.qty}</span>
-                <button class="qty-btn" onclick="changeItemQty(${idx}, 1)">+</button>
+                <button type="button" class="qty-btn" aria-label="Kurangi" onclick="changeItemQty(${idx}, -1)">−</button>
+                <span class="qty-val">${it.qty}</span>
+                <button type="button" class="qty-btn" aria-label="Tambah" onclick="changeItemQty(${idx}, 1)">+</button>
               </div>
             </div>
-            <input type="text" class="item-note-input" placeholder="Catatan (cth: jangan pedas)..." value="${it.note || ''}" onchange="updateItemNote(${idx}, this.value)">
+            ${noteOpen ? `<input type="text" class="item-note-input" id="item-note-${idx}" placeholder="Catatan (cth: jangan pedas)..." value="${escAttr(it.note)}" onchange="updateItemNote(${idx}, this.value)">` : ""}
           `;
           listContainer.appendChild(row);
         });
@@ -1253,6 +1297,7 @@
       document.getElementById("calc-total").textContent = formatRp(grandTotal);
 
       document.getElementById("input-discount-percent").value = currentOrder.discountPercent || 0;
+      document.getElementById("foot-disc-badge").textContent = currentOrder.discountPercent ? `(Diskon ${currentOrder.discountPercent}%)` : "";
 
       // Payment toggles
       document.querySelectorAll(".pay-btn-opt").forEach(btn => {
