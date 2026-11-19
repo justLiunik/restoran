@@ -11,7 +11,7 @@ Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pemba
 1. [Yang Perlu Disiapkan](#1-yang-perlu-disiapkan)
 2. [Instalasi Langkah demi Langkah](#2-instalasi-langkah-demi-langkah)
 3. [Login ke Aplikasi](#3-login-ke-aplikasi)
-4. [Menjalankan Lagi di Hari Berikutnya](#4-menjalankan-lagi-di-hari-berikutnya)
+4. [Menjalankan Lagi di Hari Berikutnya](#4-menjalankan-lagi-di-hari-berikutnya) (termasuk [setelah `git pull`](#setelah-git-pull-memperbarui-kode))
 5. [Perintah Database](#5-perintah-database)
 6. [Masalah Umum (Troubleshooting)](#6-masalah-umum-troubleshooting)
 7. [Opsional: Semua Jalan di Docker](#7-opsional-semua-jalan-di-docker)
@@ -214,6 +214,35 @@ Data tetap tersimpan di volume Docker (`dbdata`) walaupun komputer dimatikan.
 
 Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan database. Data **tidak** hilang.
 
+### Setelah `git pull` (memperbarui kode)
+
+> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada).
+
+Urutan yang aman:
+
+1. Hentikan server (`Ctrl + C`).
+2. Ambil kode terbaru:
+
+   ```bash
+   git pull
+   ```
+
+3. Pasang dependensi kalau ada yang baru:
+
+   ```bash
+   npm install
+   ```
+
+4. Perbarui database (data tidak dihapus, aman dijalankan berulang kali):
+
+   ```bash
+   npm run db:migrate
+   ```
+
+5. Jalankan server lagi: `npm start`.
+
+Database harus menyala saat `db:migrate` dijalankan (`npm run db:up`). Tidak perlu `db:reset` dan password tidak berubah.
+
 ---
 
 ## 5. Perintah Database
@@ -266,6 +295,9 @@ Database belum siap. Cek `docker compose ps` sampai `healthy`, lalu ulangi.
 
 **`Access denied for user 'root'`**
 `MYSQL_ROOT_PASSWORD` harus sama dengan `DB_PASSWORD` di `.env`. MySQL hanya membaca password saat pertama kali dibuat, jadi kalau kamu mengubahnya setelah database ada, jalankan `npm run db:reset` lalu `npm run db:seed`.
+
+**`Table 'kasir_restoran.stock_movements' doesn't exist` (atau tabel lain "doesn't exist") saat bayar / void**
+Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu coba lagi. Data tidak hilang.
 
 **Login selalu gagal dengan "Username atau password salah"**
 Password hasil `db:seed` hanya muncul sekali. Jalankan `npm run db:seed` lagi dan pakai password baru yang tampil.
