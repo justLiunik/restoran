@@ -282,6 +282,143 @@ async function assertUniqueProductName(conn, categoryId, name, exceptId = null) 
     : `Menu "${name}" sudah ada tetapi nonaktif. Aktifkan kembali menu tersebut.`);
 }
 
+// ---------- RESERVASI HELPERS ----------
+
+const RESERVATION = {
+  REMINDER_MINUTES: 30,        // meja tampil biru + pengingat muncul sejak sekian menit sebelum jam booking
+  GRACE_MINUTES: 15,           // "Tidak Datang" baru boleh setelah jam booking + masa tenggang ini
+  SLOT_MINUTES: 120,           // dua reservasi "menunggu" di meja yang sama harus berjarak minimal ini
+  MAX_ADVANCE_DAYS: 60,
+  PAST_TOLERANCE_MINUTES: 5    // booking yang baru saja lewat boleh masih dicatat
+};
+
+// All reservation times are WALL-CLOCK WIB strings ('YYYY-MM-DD HH:mm:ss'), compared in Node as text/UTC math.
+// Never NOW()/CURDATE() in reservation SQL: the MySQL server may run in another time zone than this app.
+function nowWib() {
+  return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+}
+const wallMs = (s) => Date.parse(s.replace(' ', 'T') + 'Z');
+function shiftWall(s, minutes) {
+  return new Date(wallMs(s) + minutes * 60000).toISOString().slice(0, 19).replace('T', ' ');
+}
+const secondsUntilWall = (reservedFull, now) => Math.round((wallMs(reservedFull) - wallMs(now)) / 1000);
+
+// 'later' (> 30 min), 'soon' (within 30 min), 'now' (booking time reached, inside the grace period), 'late' (grace over)
+function reservationPhase(secondsUntil) {
+  if (secondsUntil > RESERVATION.REMINDER_MINUTES * 60) return 'later';
+  if (secondsUntil > 0) return 'soon';
+  if (secondsUntil > -RESERVATION.GRACE_MINUTES * 60) return 'now';
+  return 'late';
+}
+
+// 'YYYY-MM-DD HH:mm' (strict, real calendar date) -> 'YYYY-MM-DD HH:mm:00'
+function parseReservedAt(value) {
+  const m = typeof value === 'string' ? value.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/) : null;
+  if (!m) throw new HttpError(400, 'Tanggal dan jam harus berformat YYYY-MM-DD HH:mm');
+  const [y, mo, d, h, mi] = m.slice(1).map(Number);
+  const check = new Date(Date.UTC(y, mo - 1, d, h, mi));
+  if (h > 23 || mi > 59 || check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) {
+    throw new HttpError(400, 'Tanggal atau jam tidak valid');
+  }
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:00`;
+}
+
+// Not in the past (small tolerance) and not too far ahead
+function assertReservationTime(reservedAt) {
+  const diffMinutes = (wallMs(reservedAt) - wallMs(nowWib())) / 60000;
+  if (diffMinutes < -RESERVATION.PAST_TOLERANCE_MINUTES) throw new HttpError(400, 'Waktu reservasi sudah lewat');
+  if (diffMinutes > RESERVATION.MAX_ADVANCE_DAYS * 24 * 60) {
+    throw new HttpError(400, `Reservasi paling jauh ${RESERVATION.MAX_ADVANCE_DAYS} hari ke depan`);
+  }
+}
+
+// Validates the body of POST/PUT /api/reservations. Throws HttpError(400).
+function parseReservationInput(body) {
+  const b = body || {};
+
+  const name = typeof b.customer_name === 'string' ? b.customer_name.trim() : '';
+  if (!name) throw new HttpError(400, 'Nama tamu wajib diisi');
+  if (name.length > 100) throw new HttpError(400, 'Nama tamu maksimal 100 karakter');
+
+  let phone = null;
+  if (b.phone !== undefined && b.phone !== null) {
+    if (typeof b.phone !== 'string') throw new HttpError(400, 'Nomor telepon tidak valid');
+    phone = b.phone.trim() || null;
+    if (phone && phone.length > 30) throw new HttpError(400, 'Nomor telepon maksimal 30 karakter');
+    if (phone && !/^[0-9+\-()\s]+$/.test(phone)) throw new HttpError(400, 'Nomor telepon hanya boleh berisi angka, spasi, +, - dan tanda kurung');
+  }
+
+  const partySize = parseWholeNumber(b.party_size);
+  if (partySize === null || partySize < 1 || partySize > 50) throw new HttpError(400, 'Jumlah tamu harus bilangan bulat 1-50');
+
+  const tableId = parseWholeNumber(b.table_id);
+  if (tableId === null || tableId < 1) throw new HttpError(400, 'Meja wajib dipilih');
+
+  let note = null;
+  if (b.note !== undefined && b.note !== null) {
+    if (typeof b.note !== 'string') throw new HttpError(400, 'Catatan tidak valid');
+    note = b.note.trim() || null;
+    if (note && note.length > 255) throw new HttpError(400, 'Catatan maksimal 255 karakter');
+  }
+
+  return {
+    customer_name: name, phone, party_size: partySize, table_id: tableId,
+    reserved_at: parseReservedAt(b.reserved_at), note
+  };
+}
+
+const RESERVATION_SELECT = `
+  SELECT r.id, r.customer_name, r.phone, r.party_size, r.table_id,
+         t.code AS table_code, t.capacity AS table_capacity,
+         DATE_FORMAT(r.reserved_at, '%Y-%m-%d %H:%i:%s') AS reserved_full,
+         r.note, r.status, r.order_id, o.order_no,
+         DATE_FORMAT(r.arrived_at, '%Y-%m-%d %H:%i') AS arrived_at
+  FROM reservations r
+  JOIN restaurant_tables t ON t.id = r.table_id
+  LEFT JOIN orders o ON o.id = r.order_id`;
+
+// API shape of a reservation row: reserved_at as 'YYYY-MM-DD HH:mm', minutes_until, phase (only while "menunggu")
+function shapeReservation(row, now = nowWib()) {
+  const { reserved_full, ...rest } = row;
+  const seconds = secondsUntilWall(reserved_full, now);
+  return {
+    ...rest,
+    reserved_at: reserved_full.slice(0, 16),
+    minutes_until: Math.ceil(seconds / 60),
+    phase: row.status === 'menunggu' ? reservationPhase(seconds) : null
+  };
+}
+
+async function loadReservation(conn, id) {
+  const [rows] = await conn.query(`${RESERVATION_SELECT} WHERE r.id = ?`, [id]);
+  return rows.length ? shapeReservation(rows[0]) : null;
+}
+
+// Locks the table row so two staff members can not book / seat the same table at the same moment
+async function lockTable(conn, tableId) {
+  const [rows] = await conn.query('SELECT id, code FROM restaurant_tables WHERE id = ? FOR UPDATE', [tableId]);
+  if (rows.length === 0) throw new HttpError(400, 'Meja tidak ditemukan');
+  return rows[0];
+}
+
+// Only "menunggu" reservations hold a slot: another one on this table closer than SLOT_MINUTES is a clash
+async function assertSlotFree(conn, tableId, reservedAt, exceptId = null) {
+  const [rows] = await conn.query(
+    `SELECT r.customer_name, t.code,
+            DATE_FORMAT(r.reserved_at, '%H:%i') AS hhmm, DATE_FORMAT(r.reserved_at, '%Y-%m-%d') AS day
+     FROM reservations r JOIN restaurant_tables t ON t.id = r.table_id
+     WHERE r.table_id = ? AND r.status = 'menunggu' AND r.id <> ? AND r.reserved_at > ? AND r.reserved_at < ?
+     ORDER BY r.reserved_at ASC LIMIT 1`,
+    [tableId, exceptId || 0, shiftWall(reservedAt, -RESERVATION.SLOT_MINUTES), shiftWall(reservedAt, RESERVATION.SLOT_MINUTES)]
+  );
+  if (rows.length === 0) return;
+  const c = rows[0];
+  const when = c.day === reservedAt.slice(0, 10) ? c.hhmm : `${c.day} ${c.hhmm}`;
+  throw new HttpError(409, `Meja ${c.code} sudah direservasi pukul ${when} atas nama ${c.customer_name}. Pilih jam atau meja lain.`);
+}
+
+const RESERVATION_STATUS_LABEL = { menunggu: 'Menunggu', datang: 'Datang', tidak_datang: 'Tidak Datang', batal: 'Batal' };
+
 // Generates sequential zero-padded invoice number: INV-0001
 async function generateOrderNo(conn) {
   const [rows] = await conn.query('SELECT id, order_no FROM orders ORDER BY id DESC LIMIT 1 FOR UPDATE');
@@ -768,6 +905,194 @@ app.delete('/api/admin/categories/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// ---------- RESERVASI ----------
+
+// GET /api/reservations -> last 7 days and everything ahead, plus any reservation still unresolved (menunggu, or
+// seated without an order) however old, so no table can stay blocked by a reservation nobody can see.
+app.get('/api/reservations', async (req, res) => {
+  try {
+    const now = nowWib();
+    const since = `${shiftWall(now, -7 * 24 * 60).slice(0, 10)} 00:00:00`;
+    const [rows] = await db.query(
+      `${RESERVATION_SELECT}
+       WHERE r.reserved_at >= ? OR r.status = 'menunggu' OR (r.status = 'datang' AND r.order_id IS NULL)
+       ORDER BY r.reserved_at ASC, r.id ASC LIMIT 500`,
+      [since]
+    );
+    res.json({
+      config: {
+        reminder_minutes: RESERVATION.REMINDER_MINUTES,
+        grace_minutes: RESERVATION.GRACE_MINUTES,
+        slot_minutes: RESERVATION.SLOT_MINUTES
+      },
+      now: now.slice(0, 16),
+      reservations: rows.map(r => shapeReservation(r, now))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/reservations { customer_name, party_size, table_id, reserved_at: 'YYYY-MM-DD HH:mm', phone?, note? }
+app.post('/api/reservations', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const input = parseReservationInput(req.body);
+    assertReservationTime(input.reserved_at);
+
+    await conn.beginTransaction();
+    await lockTable(conn, input.table_id);
+    await assertSlotFree(conn, input.table_id, input.reserved_at);
+    const [ins] = await conn.query(
+      `INSERT INTO reservations (customer_name, phone, party_size, table_id, reserved_at, note, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [input.customer_name, input.phone, input.party_size, input.table_id, input.reserved_at, input.note, req.user.id]
+    );
+    await conn.commit();
+    res.status(201).json({ ok: true, reservation: await loadReservation(db, ins.insertId) });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// PUT /api/reservations/:id (same body as POST) -> only while "menunggu"
+app.put('/api/reservations/:id', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const input = parseReservationInput(req.body);
+
+    await conn.beginTransaction();
+    const [cur] = await conn.query(
+      `SELECT id, status, table_id, DATE_FORMAT(reserved_at, '%Y-%m-%d %H:%i:00') AS reserved_at
+       FROM reservations WHERE id = ? FOR UPDATE`,
+      [req.params.id]
+    );
+    if (cur.length === 0) throw new HttpError(404, 'Reservasi tidak ditemukan');
+    if (cur[0].status !== 'menunggu') {
+      throw new HttpError(409, `Reservasi yang sudah ${RESERVATION_STATUS_LABEL[cur[0].status]} tidak bisa diubah`);
+    }
+    if (input.reserved_at !== cur[0].reserved_at) assertReservationTime(input.reserved_at);
+
+    // lock in a fixed order (by table id) so two edits can not deadlock
+    for (const tableId of [...new Set([cur[0].table_id, input.table_id])].sort((a, b) => a - b)) {
+      await lockTable(conn, tableId);
+    }
+    await assertSlotFree(conn, input.table_id, input.reserved_at, cur[0].id);
+
+    await conn.query(
+      `UPDATE reservations SET customer_name = ?, phone = ?, party_size = ?, table_id = ?, reserved_at = ?, note = ?
+       WHERE id = ?`,
+      [input.customer_name, input.phone, input.party_size, input.table_id, input.reserved_at, input.note, cur[0].id]
+    );
+    await conn.commit();
+    res.json({ ok: true, reservation: await loadReservation(db, cur[0].id) });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// Reads one reservation row inside a transaction (FOR UPDATE); throws 404
+async function lockReservation(conn, id) {
+  const [rows] = await conn.query(
+    `SELECT id, status, table_id, order_id, DATE_FORMAT(reserved_at, '%Y-%m-%d %H:%i:%s') AS reserved_full
+     FROM reservations WHERE id = ? FOR UPDATE`,
+    [id]
+  );
+  if (rows.length === 0) throw new HttpError(404, 'Reservasi tidak ditemukan');
+  return rows[0];
+}
+
+const finishedMessage = (status) => `Reservasi ini sudah ditandai ${RESERVATION_STATUS_LABEL[status]}`;
+
+// POST /api/reservations/:id/arrive -> "Tamu Datang": reservation becomes "datang"; the table then shows as terisi
+// (the new order is created by the client; saving it links the order to this reservation, see POST /api/orders)
+app.post('/api/reservations/:id/arrive', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const cur = await lockReservation(conn, req.params.id);
+    if (cur.status !== 'menunggu') throw new HttpError(409, finishedMessage(cur.status));
+
+    const table = await lockTable(conn, cur.table_id);
+    const [busy] = await conn.query(
+      'SELECT order_no FROM orders WHERE table_id = ? AND status IN (?) LIMIT 1', [table.id, ACTIVE_ORDER_STATUSES]
+    );
+    if (busy.length > 0) {
+      throw new HttpError(409, `Meja ${table.code} masih terisi pesanan ${busy[0].order_no}. Ubah meja reservasi atau tunggu pesanan selesai.`);
+    }
+    const [seated] = await conn.query(
+      "SELECT customer_name FROM reservations WHERE table_id = ? AND status = 'datang' AND order_id IS NULL AND id <> ? LIMIT 1",
+      [table.id, cur.id]
+    );
+    if (seated.length > 0) {
+      throw new HttpError(409, `Meja ${table.code} sedang ditempati tamu ${seated[0].customer_name} yang belum memesan. Ubah meja reservasi.`);
+    }
+
+    await conn.query("UPDATE reservations SET status = 'datang', arrived_at = ? WHERE id = ?", [nowWib(), cur.id]);
+    await conn.commit();
+    res.json({ ok: true, reservation: await loadReservation(db, cur.id), table: { id: table.id, code: table.code } });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/reservations/:id/no-show -> only after booking time + grace period
+app.post('/api/reservations/:id/no-show', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const cur = await lockReservation(conn, req.params.id);
+    if (cur.status !== 'menunggu') throw new HttpError(409, finishedMessage(cur.status));
+
+    const now = nowWib();
+    const graceEnd = shiftWall(cur.reserved_full, RESERVATION.GRACE_MINUTES);
+    if (now < graceEnd) {
+      const when = graceEnd.slice(0, 10) === now.slice(0, 10) ? graceEnd.slice(11, 16) : `${graceEnd.slice(0, 10)} ${graceEnd.slice(11, 16)}`;
+      throw new HttpError(400, `Baru bisa ditandai Tidak Datang setelah ${when}`);
+    }
+
+    await conn.query("UPDATE reservations SET status = 'tidak_datang' WHERE id = ?", [cur.id]);
+    await conn.commit();
+    res.json({ ok: true, reservation: await loadReservation(db, cur.id) });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/reservations/:id/cancel -> "menunggu", or "datang" that has not ordered yet (guest left)
+app.post('/api/reservations/:id/cancel', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const cur = await lockReservation(conn, req.params.id);
+    if (cur.status === 'datang' && cur.order_id) {
+      throw new HttpError(409, 'Tamu sudah memesan, reservasi tidak bisa dibatalkan. Selesaikan atau batalkan pesanannya.');
+    }
+    if (cur.status !== 'menunggu' && cur.status !== 'datang') throw new HttpError(409, finishedMessage(cur.status));
+
+    await conn.query("UPDATE reservations SET status = 'batal' WHERE id = ?", [cur.id]);
+    await conn.commit();
+    res.json({ ok: true, reservation: await loadReservation(db, cur.id) });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
 // GET /api/tables
 app.get('/api/tables', async (req, res) => {
   try {
@@ -782,7 +1107,62 @@ app.get('/api/tables', async (req, res) => {
       ) o ON o.table_id = t.id
       ORDER BY t.id ASC
     `);
-    res.json(rows);
+
+    // The status shown on the floor plan is DERIVED (restaurant_tables.status is only written by the order flow):
+    //   1. active order on the table        -> its stored status (terisi / menunggu_bayar)
+    //   2. guest seated, not ordered yet    -> terisi   (+ seated_reservation)
+    //   3. waiting reservation within 30 min of its time, or past it until resolved -> reservasi (+ reservation)
+    //   4. otherwise                        -> stored status (kosong)
+    const now = nowWib();
+    const windowEnd = shiftWall(now, RESERVATION.REMINDER_MINUTES);
+    const [resv] = await db.query(
+      `SELECT r.id, r.table_id, r.customer_name, r.party_size, r.status,
+              DATE_FORMAT(r.reserved_at, '%Y-%m-%d %H:%i:%s') AS reserved_full
+       FROM reservations r
+       WHERE (r.status = 'menunggu' AND r.reserved_at <= ?) OR (r.status = 'datang' AND r.order_id IS NULL)
+       ORDER BY r.reserved_at ASC, r.id ASC`,
+      [`${now.slice(0, 10)} 23:59:59`]
+    );
+    const byTable = new Map();
+    for (const r of resv) {
+      const info = byTable.get(r.table_id) || {};
+      if (r.status === 'datang') {
+        info.seated = info.seated || r;
+      } else if (r.reserved_full <= windowEnd) {
+        info.inWindow = info.inWindow || r;
+      } else {
+        info.next = info.next || r;
+      }
+      byTable.set(r.table_id, info);
+    }
+
+    res.json(rows.map(t => {
+      const info = byTable.get(t.id) || {};
+      let status = t.status === 'reservasi' ? 'kosong' : t.status; // a leftover stored value has no reservation behind it
+      let reservation = null;
+      let seated = null;
+      if (!t.active_order_id) {
+        if (info.seated) {
+          status = 'terisi';
+          seated = { id: info.seated.id, customer_name: info.seated.customer_name };
+        } else if (info.inWindow) {
+          const r = info.inWindow;
+          status = 'reservasi';
+          reservation = {
+            id: r.id, customer_name: r.customer_name, party_size: r.party_size,
+            reserved_at: r.reserved_full.slice(11, 16), reserved_at_full: r.reserved_full.slice(0, 16),
+            phase: reservationPhase(secondsUntilWall(r.reserved_full, now))
+          };
+        }
+      }
+      return {
+        ...t,
+        status,
+        reservation,
+        seated_reservation: seated,
+        next_reservation_at: info.next ? info.next.reserved_full.slice(11, 16) : null
+      };
+    }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -955,6 +1335,11 @@ app.post('/api/orders', async (req, res) => {
     // Set table to 'terisi' if dine_in
     if (order_type === 'dine_in' && table_id) {
       await conn.query('UPDATE restaurant_tables SET status = "terisi" WHERE id = ?', [table_id]);
+      // A guest seated from a reservation ("Tamu Datang") and not ordered yet: this order is theirs
+      await conn.query(
+        "UPDATE reservations SET order_id = ? WHERE table_id = ? AND status = 'datang' AND order_id IS NULL",
+        [orderId, table_id]
+      );
     }
 
     await conn.commit();
@@ -1675,9 +2060,25 @@ app.get('/api/dashboard/alerts', async (req, res) => {
       ORDER BY opened_at DESC
     `);
 
+    // Reservations to remind about: waiting ones within 30 minutes of their time, or already past it
+    const now = nowWib();
+    const [dueRows] = await db.query(
+      `${RESERVATION_SELECT} WHERE r.status = 'menunggu' AND r.reserved_at <= ? ORDER BY r.reserved_at ASC, r.id ASC`,
+      [shiftWall(now, RESERVATION.REMINDER_MINUTES)]
+    );
+    const reservations = dueRows.map(row => {
+      const r = shapeReservation(row, now);
+      return {
+        id: r.id, customer_name: r.customer_name, table_code: r.table_code, party_size: r.party_size,
+        reserved_at: r.reserved_at.slice(11, 16), reserved_at_full: r.reserved_at,
+        minutes_until: r.minutes_until, phase: r.phase
+      };
+    });
+
     res.json({
       low_stock: lowStock,
-      online_orders: onlineOrders
+      online_orders: onlineOrders,
+      reservations
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

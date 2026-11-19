@@ -1,6 +1,6 @@
 # Kasir Restoran
 
-Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok dan menu, dan dashboard penjualan.
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok dan menu, reservasi meja, dan dashboard penjualan.
 
 **Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
@@ -211,6 +211,30 @@ Tab **🛠️ Kelola Menu** hanya muncul untuk **Admin** dan **Supervisor** (kas
 - Foto berupa **link gambar** (diawali `http://` atau `https://`). Menu tanpa foto tampil sebagai kotak berwarna dengan huruf pertama namanya.
 - Fitur ini **tidak** menambah tabel atau kolom, jadi `npm run db:migrate` tidak perlu dijalankan khusus untuknya.
 
+### Reservasi
+
+Kartu **📅 Reservasi** ada di tab **Denah Meja & Pesanan**, di bawah denah. Semua peran (kasir, supervisor, admin) bisa mencatat dan memproses reservasi. Reservasi dicatat langsung oleh staf saat tamu datang ke restoran (belum ada booking lewat telepon atau online).
+
+| Aksi | Hasilnya |
+|---|---|
+| **+ Reservasi** | Isi nama tamu, jumlah tamu, meja, tanggal, dan jam. Telepon dan catatan boleh kosong. Jumlah tamu melebihi kapasitas meja hanya diberi peringatan. |
+| **Tamu Datang** | Reservasi jadi *Datang*, meja jadi *Terisi*, dan panel **pesanan baru untuk meja itu terbuka otomatis** (nama tamu sudah terisi). Pesanan yang disimpan otomatis tertaut ke reservasi itu. |
+| **Tidak Datang** | Baru bisa dipakai **15 menit setelah jam booking**. Meja dilepas. |
+| **Batal** | Bisa kapan saja selagi *Menunggu*, atau untuk tamu yang sudah duduk tetapi belum memesan. Meja dilepas. |
+| **Ubah** | Hanya untuk reservasi *Menunggu*: nama, telepon, jumlah, meja, tanggal/jam, catatan. |
+
+Klik sebuah baris (atau meja biru di denah) untuk membuka rincian dan semua aksinya. Daftar diurutkan menurut jam; filter **Menunggu / Hari ini / Semua** (7 hari terakhir dan yang akan datang).
+
+**Aturan waktu** (semua memakai jam WIB):
+- Meja tampil **biru "Reservasi"** mulai **30 menit sebelum** jam booking sampai reservasinya diselesaikan (Datang / Tidak Datang / Batal). Sebelum itu meja masih bisa dipakai tamu biasa; meja kosong yang punya booking nanti diberi teks kecil "Resv 19:00".
+- **Pengingat** muncul 30 menit sebelum jam booking, lagi saat waktunya, dan sebagai "terlambat" bila lewat jam. Pengingat tampil di lonceng notifikasi, sebagai pesan singkat sekali saja, dan baris reservasinya disorot.
+- **Satu meja tidak bisa dipesan dua kali** bila jam dua reservasi *Menunggu* di meja itu berselisih **kurang dari 2 jam** (tepat 2 jam boleh).
+- Booking tidak boleh di masa lalu (toleransi 5 menit) dan paling jauh 60 hari ke depan.
+- **Tamu Datang** ditolak kalau meja masih dipakai pesanan lain; ubah meja reservasinya lewat **Ubah**.
+- Tamu yang sudah duduk tetapi pesanannya dibuang: meja tetap *Terisi*. Klik meja itu (atau **Buka Pesanan**) untuk membuka pesanan lagi, atau **Batal** kalau tamunya pergi.
+
+> ⚠️ Fitur ini menambah tabel `reservations`. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Migrasi juga mengembalikan meja T08 dan T11 dari status "reservasi" bawaan data awal (yang tidak punya reservasi nyata) ke *Kosong*.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -233,7 +257,7 @@ Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan d
 
 ### Setelah `git pull` (memperbarui kode)
 
-> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada).
+> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` belum ada).
 
 Urutan yang aman:
 
@@ -313,7 +337,7 @@ Database belum siap. Cek `docker compose ps` sampai `healthy`, lalu ulangi.
 **`Access denied for user 'root'`**
 `MYSQL_ROOT_PASSWORD` harus sama dengan `DB_PASSWORD` di `.env`. MySQL hanya membaca password saat pertama kali dibuat, jadi kalau kamu mengubahnya setelah database ada, jalankan `npm run db:reset` lalu `npm run db:seed`.
 
-**`Table 'kasir_restoran.stock_movements' doesn't exist` (atau tabel lain "doesn't exist") saat bayar / void**
+**`Table 'kasir_restoran.stock_movements' doesn't exist` atau `...reservations' doesn't exist` (atau tabel lain "doesn't exist") saat bayar / void, atau denah meja dan daftar reservasi tidak mau muncul**
 Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu coba lagi. Data tidak hilang.
 
 **Login selalu gagal dengan "Username atau password salah"**

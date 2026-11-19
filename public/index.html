@@ -143,6 +143,25 @@
     .mf-image-preview { width: 72px; height: 72px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 10px; text-align: center; color: var(--text-muted); background: var(--bg-subtle); flex-shrink: 0; }
     .mf-image-preview img { width: 100%; height: 100%; object-fit: cover; }
     .mf-image-preview .menu-fallback { font-size: 28px; }
+    /* Reservasi */
+    .resv-list { display: flex; flex-direction: column; gap: 8px; max-height: 440px; overflow-y: auto; }
+    .resv-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-left: 4px solid var(--info); border-radius: 8px; background: var(--bg-card); cursor: pointer; flex-wrap: wrap; }
+    .resv-row.soon, .resv-row.now { border-left-color: var(--warning); background: var(--warning-subtle); }
+    .resv-row.late { border-left-color: var(--danger); background: var(--danger-subtle); }
+    .resv-row.done { border-left-color: var(--border); opacity: 0.75; }
+    .resv-time { min-width: 64px; text-align: center; }
+    .resv-hhmm { font-size: 18px; font-weight: 800; line-height: 1.1; }
+    .resv-day { font-size: 10px; color: var(--text-muted); font-weight: 600; }
+    .resv-main { flex: 1; min-width: 150px; }
+    .resv-name { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+    .resv-phone { font-size: 11px; font-weight: 500; color: var(--text-muted); margin-left: 8px; }
+    .resv-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+    .resv-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .resv-detail-line { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
+    .resv-detail-line > span:first-child { color: var(--text-muted); flex-shrink: 0; }
+    .resv-warn { font-size: 11px; font-weight: 600; color: var(--warning); min-height: 15px; margin: 2px 0 6px; }
+    .table-resv { font-size: 10px; font-weight: 700; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .table-resv-next { font-size: 10px; font-weight: 600; margin-top: 2px; color: var(--info); }
     .stock-row { cursor: pointer; }
     .stock-row.selected td { background: var(--primary-subtle); }
     .mv-plus { color: var(--success); font-weight: 700; }
@@ -353,6 +372,22 @@
             </div>
           </div>
           <div class="table-grid" id="tables-container"></div>
+        </div>
+
+        <div class="card" id="reservation-card">
+          <div class="card-title-bar">
+            <div>
+              <div class="card-title">📅 Reservasi</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="resv-summary">Memuat...</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+              <button class="pill-btn active" id="rf-menunggu" onclick="setReservationFilter('menunggu')">Menunggu</button>
+              <button class="pill-btn" id="rf-hari_ini" onclick="setReservationFilter('hari_ini')">Hari ini</button>
+              <button class="pill-btn" id="rf-semua" onclick="setReservationFilter('semua')">Semua</button>
+              <button class="btn btn-primary btn-touch" onclick="openReservationForm()">+ Reservasi</button>
+            </div>
+          </div>
+          <div class="resv-list" id="resv-list"></div>
         </div>
 
         <div class="card">
@@ -697,6 +732,65 @@
     </div>
   </div>
 
+  <!-- MODAL: TAMBAH / UBAH RESERVASI -->
+  <div class="modal-overlay" id="modal-reservation-form">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="card-title" id="rsf-title" style="margin-bottom:4px;">➕ Reservasi Baru</div>
+
+      <label class="modal-field-label" for="rsf-name">Nama Tamu</label>
+      <input type="text" class="modal-input" id="rsf-name" maxlength="100" placeholder="Nama untuk mengenali booking" autocomplete="off"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitReservationForm();}">
+
+      <label class="modal-field-label" for="rsf-phone">Telepon (opsional)</label>
+      <input type="text" class="modal-input" id="rsf-phone" maxlength="30" inputmode="tel" placeholder="cth: 0812 3456 7890" autocomplete="off"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitReservationForm();}">
+
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;min-width:0;">
+          <label class="modal-field-label" for="rsf-party">Jumlah Tamu</label>
+          <input type="number" class="modal-input" id="rsf-party" min="1" max="50" step="1" inputmode="numeric" oninput="updateReservationCapacityWarning()"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();submitReservationForm();}">
+        </div>
+        <div style="flex:1.4;min-width:0;">
+          <label class="modal-field-label" for="rsf-table">Meja</label>
+          <select class="modal-input" id="rsf-table" onchange="updateReservationCapacityWarning()"></select>
+        </div>
+      </div>
+      <div class="resv-warn" id="rsf-capacity-warn"></div>
+
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1.2;min-width:0;">
+          <label class="modal-field-label" for="rsf-date">Tanggal</label>
+          <input type="date" class="modal-input" id="rsf-date">
+        </div>
+        <div style="flex:1;min-width:0;">
+          <label class="modal-field-label" for="rsf-time">Jam</label>
+          <input type="time" class="modal-input" id="rsf-time">
+        </div>
+      </div>
+
+      <label class="modal-field-label" for="rsf-note">Catatan (opsional)</label>
+      <input type="text" class="modal-input" id="rsf-note" maxlength="255" placeholder="cth: ulang tahun, minta dekat jendela" autocomplete="off"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitReservationForm();}">
+
+      <div class="field-error" id="rsf-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-reservation-form')">Batal</button>
+        <button class="btn btn-primary btn-touch" id="rsf-save" onclick="submitReservationForm()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: RINCIAN RESERVASI -->
+  <div class="modal-overlay" id="modal-reservation-detail">
+    <div class="modal-card" style="max-width:420px;">
+      <div class="card-title" id="rd-title" style="margin-bottom:6px;overflow-wrap:anywhere;">Reservasi</div>
+      <div id="rd-body"></div>
+      <div class="field-error" id="rd-error" role="alert" style="margin-top:8px;"></div>
+      <div id="rd-actions" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:6px;"></div>
+    </div>
+  </div>
+
   <!-- MODAL: TAMBAH / UBAH MENU -->
   <div class="modal-overlay" id="modal-menu-form">
     <div class="modal-card" style="max-width:440px;">
@@ -1008,13 +1102,13 @@
     }
 
     // ---------- TOAST SYSTEM ----------
-    function showToast(msg) {
+    function showToast(msg, ms = 3200) {
       const container = document.getElementById("toast-container");
       const t = document.createElement("div");
       t.className = "toast";
       t.textContent = msg;
       container.appendChild(t);
-      setTimeout(() => t.remove(), 3200);
+      setTimeout(() => t.remove(), ms);
     }
 
     // ---------- CLOCK RUNNER ----------
@@ -1103,6 +1197,7 @@
           fetchPaymentMethods(),
           fetchCurrentShift(),
           fetchAlerts(),
+          fetchReservations(),
           fetchRecentTransactions()
         ]);
       } catch (e) {
@@ -1186,6 +1281,21 @@
         const data = await api('/api/dashboard/alerts');
         notifications = [];
 
+        // Reservation reminders come first (most urgent): 30 minutes before, at booking time, and when late
+        (data.reservations || []).forEach(r => {
+          const title = r.phase === "soon" ? `Reservasi ${r.minutes_until} menit lagi`
+            : r.phase === "now" ? "Waktunya reservasi"
+            : `Reservasi terlambat ${Math.max(1, -r.minutes_until)} menit`;
+          notifications.push({
+            id: `resv-${r.id}`,
+            title,
+            message: `${r.customer_name} • ${r.table_code} • ${r.party_size} orang • pukul ${r.reserved_at}`,
+            time: r.reserved_at,
+            type: r.phase === "late" ? "danger" : "warning"
+          });
+        });
+        checkReservationReminders(data.reservations || []);
+
         (data.online_orders || []).forEach(o => {
           notifications.push({
             id: `ord-${o.id}`,
@@ -1261,10 +1371,22 @@
           amountText = formatRp(tbl.active_order_total);
         }
 
+        // Reservation info: blue table -> "19:00 • Nama"; seated guest without an order -> "Tamu: Nama";
+        // free table with a booking later today -> "Resv 19:00"
+        let resvText = "";
+        if (tbl.status === "reservasi" && tbl.reservation) {
+          resvText = `<div class="table-resv" title="${esc(tbl.reservation.customer_name)}">${esc(tbl.reservation.reserved_at)} • ${esc(tbl.reservation.customer_name)}</div>`;
+        } else if (tbl.seated_reservation && !tbl.active_order_id) {
+          resvText = `<div class="table-resv" title="${esc(tbl.seated_reservation.customer_name)}">Tamu: ${esc(tbl.seated_reservation.customer_name)}</div>`;
+        } else if (tbl.next_reservation_at && tbl.status === "kosong") {
+          resvText = `<div class="table-resv-next">Resv ${esc(tbl.next_reservation_at)}</div>`;
+        }
+
         div.innerHTML = `
           <div class="table-name">${tbl.code}</div>
           <div class="table-status">${statusText}</div>
           ${amountText ? `<div class="table-amount">${amountText}</div>` : `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Kps: ${tbl.capacity}</div>`}
+          ${resvText}
         `;
 
         div.onclick = () => handleTableClick(tbl);
@@ -1286,6 +1408,12 @@
           return;
         }
         guardUnsaved(() => openSavedOrder(tbl.active_order_id));
+      } else if (tbl.status === "reservasi" && tbl.reservation) {
+        // reserved table: open the booking (Tamu Datang / Ubah / Tidak Datang / Batal), never a walk-in order
+        openReservationDetail(tbl.reservation.id);
+      } else if (tbl.seated_reservation) {
+        // guest already seated from a reservation but has not ordered yet
+        openSeatedOrder(tbl.seated_reservation.id);
       } else if (tbl.status === "reservasi") {
         showToast(`${tbl.code}: Meja telah direservasi`);
       }
@@ -2865,6 +2993,377 @@
       } catch (e) {}
     }
 
+    // ---------- RESERVASI ----------
+    // Times are wall-clock WIB strings from the server ('YYYY-MM-DD HH:mm'); the browser clock is never used for them.
+    let reservations = [];
+    let reservationNow = "";
+    let reservationConfig = { reminder_minutes: 30, grace_minutes: 15, slot_minutes: 120 };
+    let reservationFilter = "menunggu";
+    let reservationFormId = null; // null = adding a new reservation
+    let reservationBusy = false;
+    let reservationDetailId = null;
+
+    const RESV_STATUS_LABEL = { menunggu: "Menunggu", datang: "Datang", tidak_datang: "Tidak Datang", batal: "Batal" };
+    const RESV_STATUS_STYLE = {
+      menunggu: "background:var(--info-subtle);color:var(--info);",
+      datang: "background:var(--success-subtle);color:var(--success);",
+      tidak_datang: "background:var(--danger-subtle);color:var(--danger);",
+      batal: "background:var(--bg-subtle);color:var(--text-muted);border:1px solid var(--border);"
+    };
+    const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+    async function fetchReservations() {
+      try {
+        const data = await api('/api/reservations');
+        reservations = data.reservations;
+        reservationNow = data.now;
+        reservationConfig = data.config;
+        renderReservations();
+        if (document.getElementById("modal-reservation-detail").classList.contains("open")) renderReservationDetail();
+      } catch (e) {}
+    }
+
+    // Re-sync everything that shows reservations: this card, the floor plan and the reminders
+    async function afterReservationChange() {
+      await Promise.all([fetchReservations(), fetchTables(), fetchAlerts()]);
+    }
+
+    function setReservationFilter(f) {
+      reservationFilter = f;
+      renderReservations();
+    }
+
+    // 'YYYY-MM-DD HH:mm' -> "Hari ini" / "Besok" / "Kemarin" / "21 Nov"
+    function resvDateLabel(reservedAt) {
+      const today = reservationNow.slice(0, 10);
+      const day = reservedAt.slice(0, 10);
+      if (!today) return day;
+      const diff = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+      if (diff === 0) return "Hari ini";
+      if (diff === 1) return "Besok";
+      if (diff === -1) return "Kemarin";
+      const [, m, d] = day.split("-");
+      return `${Number(d)} ${MONTH_SHORT[Number(m) - 1]}`;
+    }
+
+    function resvUntilText(minutes) {
+      if (minutes < 60) return `${minutes} mnt lagi`;
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      return `${h} j${m ? ` ${m} mnt` : ""} lagi`;
+    }
+
+    function resvPhaseBadge(r) {
+      if (r.status !== "menunggu") return "";
+      if (r.phase === "soon") return `<span class="status-badge" style="background:var(--warning);">${r.minutes_until} mnt lagi</span>`;
+      if (r.phase === "now") return `<span class="status-badge" style="background:var(--warning);">Waktunya</span>`;
+      if (r.phase === "late") return `<span class="status-badge" style="background:var(--danger);">Terlambat ${Math.max(1, -r.minutes_until)} mnt</span>`;
+      return `<span style="font-size:11px;color:var(--text-muted);">${resvUntilText(r.minutes_until)}</span>`;
+    }
+
+    // "Menunggu" also lists guests who are seated but have not ordered yet, so they are never forgotten
+    function reservationMatchesFilter(r) {
+      if (reservationFilter === "menunggu") return r.status === "menunggu" || (r.status === "datang" && !r.order_id);
+      if (reservationFilter === "hari_ini") return r.reserved_at.slice(0, 10) === reservationNow.slice(0, 10);
+      return true;
+    }
+
+    function renderReservations() {
+      ["menunggu", "hari_ini", "semua"].forEach(f => {
+        document.getElementById(`rf-${f}`).classList.toggle("active", reservationFilter === f);
+      });
+
+      const waiting = reservations.filter(r => r.status === "menunggu");
+      const attention = waiting.filter(r => r.phase === "soon" || r.phase === "now" || r.phase === "late").length;
+      const summary = document.getElementById("resv-summary");
+      summary.textContent = `${waiting.length} menunggu${attention ? ` • ${attention} perlu perhatian` : ""}`;
+      summary.style.color = attention ? "var(--warning)" : "var(--text-muted)";
+
+      const list = document.getElementById("resv-list");
+      const rows = reservations.filter(reservationMatchesFilter); // the server already sorts by booking time
+      if (rows.length === 0) {
+        const msg = reservationFilter === "menunggu" ? "Tidak ada reservasi yang menunggu."
+          : reservationFilter === "hari_ini" ? "Tidak ada reservasi hari ini." : "Belum ada reservasi.";
+        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:18px 0;">${msg}</div>`;
+        return;
+      }
+
+      list.innerHTML = rows.map(r => {
+        const urgent = r.status === "menunggu" && (r.phase === "soon" || r.phase === "now" || r.phase === "late");
+        const cls = `resv-row${urgent ? ` ${r.phase}` : ""}${r.status !== "menunggu" ? " done" : ""}`;
+        let primary = "";
+        if (r.status === "menunggu") {
+          primary = `<button class="btn btn-primary btn-touch" onclick="event.stopPropagation(); arriveReservation(${r.id})">Tamu Datang</button>`;
+        } else if (r.status === "datang" && !r.order_id) {
+          primary = `<button class="btn btn-primary btn-touch" onclick="event.stopPropagation(); openSeatedOrder(${r.id})">Buka Pesanan</button>`;
+        }
+        return `
+          <div class="${cls}" onclick="openReservationDetail(${r.id})">
+            <div class="resv-time">
+              <div class="resv-hhmm">${esc(r.reserved_at.slice(11, 16))}</div>
+              <div class="resv-day">${esc(resvDateLabel(r.reserved_at))}</div>
+            </div>
+            <div class="resv-main">
+              <div class="resv-name">${esc(r.customer_name)}${r.phone ? `<span class="resv-phone">${esc(r.phone)}</span>` : ""}</div>
+              <div class="resv-meta">👥 ${r.party_size} orang • 🪑 ${esc(r.table_code)}${r.order_no ? ` • 🧾 ${esc(r.order_no)}` : ""}${r.note ? ` • ${esc(r.note)}` : ""}</div>
+            </div>
+            <div class="resv-badges">
+              <span class="status-badge" style="${RESV_STATUS_STYLE[r.status]}">${RESV_STATUS_LABEL[r.status]}</span>
+              ${resvPhaseBadge(r)}
+            </div>
+            ${primary}
+          </div>`;
+      }).join("");
+    }
+
+    // ---- Pengingat ----
+    // One toast per (reservation, booking time, phase), remembered in sessionStorage so the 15-second refresh and a page
+    // reload do not repeat it. Changing the booking time creates a new key, so the reminder fires again.
+    const RESV_REMINDED_KEY = "pos_resv_reminded";
+
+    function checkReservationReminders(list) {
+      let seen = {};
+      try { seen = JSON.parse(sessionStorage.getItem(RESV_REMINDED_KEY) || "{}") || {}; } catch (e) { seen = {}; }
+      const active = new Set();
+
+      list.forEach(r => {
+        const key = `${r.id}|${r.reserved_at_full}|${r.phase}`;
+        active.add(key);
+        if (seen[key]) return;
+        seen[key] = 1;
+        const who = `${r.customer_name} (${r.table_code}, ${r.party_size} orang)`;
+        showToast(
+          r.phase === "soon" ? `🔔 Reservasi ${who} pukul ${r.reserved_at}, ${r.minutes_until} menit lagi`
+            : r.phase === "now" ? `🔔 Waktunya reservasi: ${who} pukul ${r.reserved_at}`
+            : `⚠️ Reservasi ${who} terlambat ${Math.max(1, -r.minutes_until)} menit`,
+          8000
+        );
+      });
+
+      Object.keys(seen).forEach(k => { if (!active.has(k)) delete seen[k]; }); // resolved or moved reservations
+      try { sessionStorage.setItem(RESV_REMINDED_KEY, JSON.stringify(seen)); } catch (e) {}
+    }
+
+    // ---- Tambah / Ubah Reservasi ----
+    function openReservationForm(id) {
+      const r = id ? reservations.find(x => x.id === id) : null;
+      if (id && !r) return;
+      if (r && r.status !== "menunggu") {
+        showToast("Hanya reservasi berstatus Menunggu yang bisa diubah");
+        return;
+      }
+      reservationFormId = r ? r.id : null;
+      reservationBusy = false;
+      document.getElementById("rsf-save").disabled = false;
+      document.getElementById("rsf-title").textContent = r ? "✏️ Ubah Reservasi" : "➕ Reservasi Baru";
+
+      const sel = document.getElementById("rsf-table");
+      sel.innerHTML = `<option value="">Pilih meja...</option>` +
+        tables.map(t => `<option value="${t.id}">${esc(t.code)} • ${t.capacity} kursi${t.area ? ` • ${esc(t.area)}` : ""}</option>`).join("");
+      sel.value = r ? String(r.table_id) : "";
+
+      document.getElementById("rsf-name").value = r ? r.customer_name : "";
+      document.getElementById("rsf-phone").value = r && r.phone ? r.phone : "";
+      document.getElementById("rsf-party").value = r ? r.party_size : "2";
+      document.getElementById("rsf-date").value = r ? r.reserved_at.slice(0, 10) : reservationNow.slice(0, 10);
+      document.getElementById("rsf-time").value = r ? r.reserved_at.slice(11, 16) : "";
+      document.getElementById("rsf-note").value = r && r.note ? r.note : "";
+      document.getElementById("rsf-error").textContent = "";
+      updateReservationCapacityWarning();
+      openModal("modal-reservation-form");
+      document.getElementById("rsf-name").focus();
+    }
+
+    // Over capacity is only a warning (the table can still be booked)
+    function updateReservationCapacityWarning() {
+      const warn = document.getElementById("rsf-capacity-warn");
+      const t = tables.find(x => String(x.id) === document.getElementById("rsf-table").value);
+      const party = parseInt(document.getElementById("rsf-party").value, 10);
+      warn.textContent = t && party > t.capacity
+        ? `⚠️ Meja ${t.code} hanya untuk ${t.capacity} orang (tamu ${party}). Tetap bisa disimpan.`
+        : "";
+    }
+
+    // Reads and validates the dialog: { value } for the request body or { error, field }
+    function readReservationForm() {
+      const name = document.getElementById("rsf-name").value.trim();
+      if (!name) return { error: "Nama tamu wajib diisi", field: "rsf-name" };
+      if (name.length > 100) return { error: "Nama tamu maksimal 100 karakter", field: "rsf-name" };
+
+      const phone = document.getElementById("rsf-phone").value.trim();
+      if (phone && !/^[0-9+\-()\s]+$/.test(phone)) {
+        return { error: "Telepon hanya boleh berisi angka, spasi, +, - dan tanda kurung", field: "rsf-phone" };
+      }
+
+      const partyEl = document.getElementById("rsf-party");
+      const party = parseStockInput(partyEl.value, { min: 1, max: 50, label: "Jumlah tamu", badInput: partyEl.validity.badInput });
+      if (party.error) return { error: party.error, field: "rsf-party" };
+
+      const tableId = Number(document.getElementById("rsf-table").value);
+      if (!tableId) return { error: "Meja wajib dipilih", field: "rsf-table" };
+
+      const date = document.getElementById("rsf-date").value;
+      if (!date) return { error: "Tanggal wajib diisi", field: "rsf-date" };
+      const time = document.getElementById("rsf-time").value;
+      if (!time) return { error: "Jam wajib diisi", field: "rsf-time" };
+
+      const note = document.getElementById("rsf-note").value.trim();
+      return {
+        value: {
+          customer_name: name, phone: phone || null, party_size: party.value, table_id: tableId,
+          reserved_at: `${date} ${time.slice(0, 5)}`, note: note || null
+        }
+      };
+    }
+
+    async function submitReservationForm() {
+      if (reservationBusy) return;
+      const errEl = document.getElementById("rsf-error");
+      errEl.textContent = "";
+      const r = readReservationForm();
+      if (r.error) {
+        errEl.textContent = r.error;
+        document.getElementById(r.field).focus();
+        return;
+      }
+
+      reservationBusy = true;
+      const btn = document.getElementById("rsf-save");
+      btn.disabled = true;
+      const editing = reservationFormId !== null;
+      try {
+        const res = await api(editing ? `/api/reservations/${reservationFormId}` : '/api/reservations', {
+          method: editing ? 'PUT' : 'POST',
+          body: JSON.stringify(r.value)
+        });
+        closeModal("modal-reservation-form");
+        const t = res.reservation;
+        showToast(`Reservasi ${t.customer_name} (${t.table_code}, ${t.reserved_at.slice(11, 16)}) ${editing ? "diperbarui" : "disimpan"}`);
+        afterReservationChange();
+      } catch (e) {
+        errEl.textContent = e.message; // e.g. slot clash: the dialog stays open so the time or table can be changed
+      } finally {
+        reservationBusy = false;
+        btn.disabled = false;
+      }
+    }
+
+    // ---- Rincian reservasi + aksi ----
+    function openReservationDetail(id) {
+      if (!reservations.find(x => x.id === id)) return;
+      reservationDetailId = id;
+      document.getElementById("rd-error").textContent = "";
+      renderReservationDetail();
+      openModal("modal-reservation-detail");
+    }
+
+    function renderReservationDetail() {
+      const r = reservations.find(x => x.id === reservationDetailId);
+      if (!r) {
+        closeModal("modal-reservation-detail");
+        return;
+      }
+      document.getElementById("rd-title").textContent = `📅 ${r.customer_name}`;
+
+      const over = r.party_size > r.table_capacity;
+      const line = (label, value) => `<div class="resv-detail-line"><span>${label}</span><span>${value}</span></div>`;
+      document.getElementById("rd-body").innerHTML =
+        line("Status", `<span class="status-badge" style="${RESV_STATUS_STYLE[r.status]}">${RESV_STATUS_LABEL[r.status]}</span> ${resvPhaseBadge(r)}`) +
+        line("Jam", `<strong>${esc(r.reserved_at.slice(11, 16))}</strong> • ${esc(resvDateLabel(r.reserved_at))} (${esc(r.reserved_at.slice(0, 10))})`) +
+        line("Meja", `${esc(r.table_code)} (${r.table_capacity} kursi)`) +
+        line("Jumlah tamu", `${r.party_size} orang${over ? ` <span style="color:var(--warning);">⚠️ melebihi kapasitas</span>` : ""}`) +
+        (r.phone ? line("Telepon", esc(r.phone)) : "") +
+        (r.note ? line("Catatan", esc(r.note)) : "") +
+        (r.order_no ? line("Pesanan", esc(r.order_no)) : "") +
+        (r.arrived_at ? line("Datang pukul", esc(r.arrived_at.slice(11, 16))) : "");
+
+      const actions = [];
+      if (r.status === "menunggu") {
+        // "Tidak Datang" only after the grace period (the server checks it too)
+        const graceReached = r.phase === "late";
+        const graceEnd = new Date(Date.parse(`${r.reserved_at.replace(" ", "T")}:00Z`) + reservationConfig.grace_minutes * 60000)
+          .toISOString().slice(11, 16);
+        actions.push(`<button class="btn btn-primary btn-touch" onclick="arriveReservation(${r.id})">Tamu Datang</button>`);
+        actions.push(`<button class="btn btn-subtle btn-touch" onclick="openReservationFormFromDetail(${r.id})">Ubah</button>`);
+        actions.push(`<button class="btn btn-subtle btn-touch" ${graceReached ? "" : "disabled"} title="${graceReached ? "" : `Baru bisa setelah ${graceEnd}`}" onclick="reservationAction(${r.id}, 'no-show')">Tidak Datang</button>`);
+        actions.push(`<button class="btn btn-subtle btn-touch" onclick="reservationAction(${r.id}, 'cancel')">Batal</button>`);
+        if (!graceReached) {
+          document.getElementById("rd-body").innerHTML += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Tidak Datang bisa dipakai setelah ${graceEnd} (masa tenggang ${reservationConfig.grace_minutes} menit).</div>`;
+        }
+      } else if (r.status === "datang" && !r.order_id) {
+        actions.push(`<button class="btn btn-primary btn-touch" onclick="openSeatedOrder(${r.id})">Buka Pesanan</button>`);
+        actions.push(`<button class="btn btn-subtle btn-touch" onclick="reservationAction(${r.id}, 'cancel')">Batal</button>`);
+        document.getElementById("rd-body").innerHTML += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Tamu sudah duduk tetapi belum memesan. Batal melepas meja bila tamu pergi.</div>`;
+      }
+      actions.push(`<button class="btn btn-subtle btn-touch" onclick="closeModal('modal-reservation-detail')">Tutup</button>`);
+      document.getElementById("rd-actions").innerHTML = actions.join("");
+    }
+
+    function openReservationFormFromDetail(id) {
+      closeModal("modal-reservation-detail");
+      openReservationForm(id);
+    }
+
+    // "Tamu Datang": reservation -> Datang, table -> Terisi, and a new order for that table opens right away
+    async function arriveReservation(id) {
+      const r = reservations.find(x => x.id === id);
+      if (!r) return;
+      guardUnsaved(async () => {
+        try {
+          const res = await api(`/api/reservations/${id}/arrive`, { method: 'POST' });
+          closeModal("modal-reservation-detail");
+          startNewOrder({ target: res.table.code, table_id: res.table.id, type: "dine_in", customer_name: res.reservation.customer_name });
+          showToast(`${res.reservation.customer_name} sudah datang. Catat pesanan untuk ${res.table.code}`);
+          afterReservationChange();
+        } catch (e) {
+          document.getElementById("rd-error").textContent = e.message; // e.g. the table is still in use
+        }
+      });
+    }
+
+    // A guest who is seated but has not ordered yet: open a new order for their table
+    function openSeatedOrder(reservationId) {
+      const r = reservations.find(x => x.id === reservationId);
+      if (!r || r.status !== "datang" || r.order_id) return;
+      guardUnsaved(() => {
+        closeModal("modal-reservation-detail");
+        startNewOrder({ target: r.table_code, table_id: r.table_id, type: "dine_in", customer_name: r.customer_name });
+      });
+    }
+
+    // "Tidak Datang" / "Batal" (both release the table)
+    async function reservationAction(id, action) {
+      const r = reservations.find(x => x.id === id);
+      if (!r) return;
+      const time = r.reserved_at.slice(11, 16);
+      const text = {
+        "no-show": {
+          title: "Tandai tidak datang?",
+          message: `${r.customer_name} (${r.table_code}, ${time}) belum datang. Reservasi ditandai Tidak Datang dan meja dilepas.`,
+          okLabel: "Tidak Datang",
+          done: `Reservasi ${r.customer_name} ditandai Tidak Datang`
+        },
+        cancel: {
+          title: "Batalkan reservasi?",
+          message: r.status === "datang"
+            ? `${r.customer_name} sudah duduk di ${r.table_code} tetapi belum memesan. Batalkan reservasi dan lepas meja?`
+            : `Reservasi ${r.customer_name} (${r.table_code}, ${time}) akan dibatalkan dan meja dilepas.`,
+          okLabel: "Batalkan Reservasi",
+          done: `Reservasi ${r.customer_name} dibatalkan`
+        }
+      }[action];
+      const yes = await askConfirm({ title: text.title, message: text.message, okLabel: text.okLabel, danger: true });
+      if (!yes) return;
+      try {
+        await api(`/api/reservations/${id}/${action}`, { method: 'POST' });
+        closeModal("modal-reservation-detail");
+        showToast(text.done);
+        afterReservationChange();
+      } catch (e) {
+        document.getElementById("rd-error").textContent = e.message;
+      }
+    }
+
     // ---------- KELOLA MENU (admin / supervisor) ----------
     // The server enforces the role too (403 for kasir); this only decides what is shown.
     const MENU_MANAGER_ROLES = ["admin", "supervisor"];
@@ -3373,6 +3872,7 @@
           fetchTables();
           fetchSummary();
           fetchAlerts();
+          fetchReservations();
         }
       }, 15000);
     }
