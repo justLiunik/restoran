@@ -207,7 +207,7 @@ const MAX_LOW_STOCK_THRESHOLD = 1000;
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Hanya admin atau supervisor yang dapat mengelola menu' });
+      return res.status(403).json({ error: 'Hanya admin atau supervisor yang dapat mengelola menu dan meja' });
     }
     next();
   };
@@ -395,9 +395,11 @@ async function loadReservation(conn, id) {
 }
 
 // Locks the table row so two staff members can not book / seat the same table at the same moment
-async function lockTable(conn, tableId) {
-  const [rows] = await conn.query('SELECT id, code FROM restaurant_tables WHERE id = ? FOR UPDATE', [tableId]);
+// (the same lock "Atur Meja" takes before deactivating a table, so a booking can not slip in at that moment)
+async function lockTable(conn, tableId, { requireActive = true } = {}) {
+  const [rows] = await conn.query('SELECT id, code, is_active FROM restaurant_tables WHERE id = ? FOR UPDATE', [tableId]);
   if (rows.length === 0) throw new HttpError(400, 'Meja tidak ditemukan');
+  if (requireActive && !rows[0].is_active) throw new HttpError(400, `Meja ${rows[0].code} tidak aktif`);
   return rows[0];
 }
 
@@ -418,6 +420,81 @@ async function assertSlotFree(conn, tableId, reservedAt, exceptId = null) {
 }
 
 const RESERVATION_STATUS_LABEL = { menunggu: 'Menunggu', datang: 'Datang', tidak_datang: 'Tidak Datang', batal: 'Batal' };
+
+// ---------- KELOLA MEJA HELPERS ----------
+
+// Validates the body of POST/PUT /api/admin/tables. Throws HttpError(400).
+function parseTableInput(body) {
+  const b = body || {};
+
+  const code = typeof b.code === 'string' ? b.code.trim() : '';
+  if (!code) throw new HttpError(400, 'Kode meja wajib diisi');
+  if (code.length > 10) throw new HttpError(400, 'Kode meja maksimal 10 karakter');
+
+  const capacity = parseWholeNumber(b.capacity);
+  if (capacity === null || capacity < 1 || capacity > 50) throw new HttpError(400, 'Kapasitas harus bilangan bulat 1-50');
+
+  let area = null;
+  if (b.area !== undefined && b.area !== null) {
+    if (typeof b.area !== 'string') throw new HttpError(400, 'Area tidak valid');
+    area = b.area.trim() || null;
+    if (area && area.length > 30) throw new HttpError(400, 'Area maksimal 30 karakter');
+  }
+  return { code, capacity, area };
+}
+
+const TABLE_FIELDS = 'id, code, capacity, area, is_active';
+
+async function loadTable(conn, id) {
+  const [rows] = await conn.query(`SELECT ${TABLE_FIELDS} FROM restaurant_tables WHERE id = ?`, [id]);
+  return rows[0] || null;
+}
+
+// Table codes are unique (case-insensitive), inactive tables included
+async function assertTableCodeFree(conn, code, exceptId = null) {
+  const [rows] = await conn.query(
+    'SELECT code, is_active FROM restaurant_tables WHERE LOWER(code) = LOWER(?) AND id <> ? LIMIT 1',
+    [code, exceptId || 0]
+  );
+  if (rows.length === 0) return;
+  throw new HttpError(409, rows[0].is_active
+    ? `Kode meja ${rows[0].code} sudah dipakai`
+    : `Kode meja ${rows[0].code} sudah dipakai meja nonaktif. Aktifkan kembali meja itu.`);
+}
+
+// Why a table can not be deactivated right now (null = free): active order, waiting reservation, or a seated guest
+// who has not ordered yet. Callers run it inside the transaction that holds the table row lock.
+async function tableBusyReason(conn, tableId, code) {
+  const [orders] = await conn.query(
+    'SELECT order_no FROM orders WHERE table_id = ? AND status IN (?) LIMIT 1', [tableId, ACTIVE_ORDER_STATUSES]
+  );
+  if (orders.length > 0) {
+    return `Meja ${code} masih dipakai pesanan ${orders[0].order_no}. Selesaikan atau batalkan pesanan itu dulu.`;
+  }
+  const [waiting] = await conn.query(
+    `SELECT customer_name, DATE_FORMAT(reserved_at, '%Y-%m-%d %H:%i') AS at
+     FROM reservations WHERE table_id = ? AND status = 'menunggu' ORDER BY reserved_at ASC LIMIT 1`,
+    [tableId]
+  );
+  if (waiting.length > 0) {
+    const when = waiting[0].at.slice(0, 10) === nowWib().slice(0, 10) ? waiting[0].at.slice(11) : waiting[0].at;
+    return `Meja ${code} masih punya reservasi yang menunggu (${when} atas nama ${waiting[0].customer_name}). Batalkan atau pindahkan reservasinya dulu.`;
+  }
+  const [seated] = await conn.query(
+    "SELECT customer_name FROM reservations WHERE table_id = ? AND status = 'datang' AND order_id IS NULL LIMIT 1",
+    [tableId]
+  );
+  if (seated.length > 0) {
+    return `Meja ${code} sedang ditempati tamu ${seated[0].customer_name} yang belum memesan. Buka pesanannya atau batalkan reservasi itu dulu.`;
+  }
+  return null;
+}
+
+// codes are UNIQUE: two simultaneous saves of the same code end here as ER_DUP_ENTRY
+function sendTableError(res, err) {
+  if (err && err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Kode meja sudah dipakai' });
+  res.status(err.status || 500).json({ error: err.message });
+}
 
 // Generates sequential zero-padded invoice number: INV-0001
 async function generateOrderNo(conn) {
@@ -978,7 +1055,7 @@ app.put('/api/reservations/:id', async (req, res) => {
 
     // lock in a fixed order (by table id) so two edits can not deadlock
     for (const tableId of [...new Set([cur[0].table_id, input.table_id])].sort((a, b) => a - b)) {
-      await lockTable(conn, tableId);
+      await lockTable(conn, tableId, { requireActive: tableId === input.table_id }); // only the target must be active
     }
     await assertSlotFree(conn, input.table_id, input.reserved_at, cur[0].id);
 
@@ -1093,6 +1170,76 @@ app.post('/api/reservations/:id/cancel', async (req, res) => {
   }
 });
 
+// ---------- KELOLA MEJA (admin / supervisor) ----------
+
+// GET /api/admin/tables -> every table, active or not; in_use_reason says why it can not be deactivated (or null)
+app.get('/api/admin/tables', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(`SELECT ${TABLE_FIELDS} FROM restaurant_tables ORDER BY id ASC`);
+    for (const t of rows) t.in_use_reason = t.is_active ? await tableBusyReason(db, t.id, t.code) : null;
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/tables { code, capacity, area? }
+app.post('/api/admin/tables', requireAdmin, async (req, res) => {
+  try {
+    const input = parseTableInput(req.body);
+    await assertTableCodeFree(db, input.code);
+    const [ins] = await db.query(
+      'INSERT INTO restaurant_tables (code, capacity, area) VALUES (?, ?, ?)', [input.code, input.capacity, input.area]
+    );
+    res.status(201).json({ ok: true, table: await loadTable(db, ins.insertId) });
+  } catch (err) {
+    sendTableError(res, err);
+  }
+});
+
+// PUT /api/admin/tables/:id { code, capacity, area } -> allowed while the table is in use (old orders and
+// reservations show the new code because they read it from the table)
+app.put('/api/admin/tables/:id', requireAdmin, async (req, res) => {
+  try {
+    const input = parseTableInput(req.body);
+    const found = await loadTable(db, req.params.id);
+    if (!found) throw new HttpError(404, 'Meja tidak ditemukan');
+    await assertTableCodeFree(db, input.code, found.id);
+    await db.query('UPDATE restaurant_tables SET code = ?, capacity = ?, area = ? WHERE id = ?',
+      [input.code, input.capacity, input.area, found.id]);
+    res.json({ ok: true, table: await loadTable(db, found.id) });
+  } catch (err) {
+    sendTableError(res, err);
+  }
+});
+
+// PATCH /api/admin/tables/:id/active { is_active: boolean } -> "delete" = deactivate (history stays); idempotent.
+// Deactivating is refused (409) while the table is in use.
+app.patch('/api/admin/tables/:id/active', requireAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const isActive = req.body && req.body.is_active;
+    if (typeof isActive !== 'boolean') throw new HttpError(400, 'is_active harus true atau false');
+
+    await conn.beginTransaction();
+    // the row lock is shared with order and reservation creation, so none of them can slip in while we check
+    const [rows] = await conn.query('SELECT id, code, is_active FROM restaurant_tables WHERE id = ? FOR UPDATE', [req.params.id]);
+    if (rows.length === 0) throw new HttpError(404, 'Meja tidak ditemukan');
+    if (!isActive && rows[0].is_active) {
+      const reason = await tableBusyReason(conn, rows[0].id, rows[0].code);
+      if (reason) throw new HttpError(409, reason);
+    }
+    await conn.query('UPDATE restaurant_tables SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, rows[0].id]);
+    await conn.commit();
+    res.json({ ok: true, table: await loadTable(db, rows[0].id) });
+  } catch (err) {
+    await conn.rollback();
+    sendTableError(res, err);
+  } finally {
+    conn.release();
+  }
+});
+
 // GET /api/tables
 app.get('/api/tables', async (req, res) => {
   try {
@@ -1105,6 +1252,7 @@ app.get('/api/tables', async (req, res) => {
         FROM orders
         WHERE status IN ('baru', 'diproses', 'siap_saji', 'belum_dibayar', 'hold')
       ) o ON o.table_id = t.id
+      WHERE t.is_active = 1
       ORDER BY t.id ASC
     `);
 
@@ -1273,8 +1421,13 @@ app.post('/api/orders', async (req, res) => {
       throw new Error('Pesanan harus memiliki minimal 1 item');
     }
 
-    // A dine-in table can only have one active order
+    // A dine-in table can only have one active order, and only an active table can take one
     if (order_type === 'dine_in' && table_id) {
+      // same row lock "Atur Meja" takes before deactivating, so the two can never both succeed
+      const [tbl] = await conn.query('SELECT code, is_active FROM restaurant_tables WHERE id = ? FOR UPDATE', [table_id]);
+      if (tbl.length === 0) throw new Error('Meja tidak ditemukan');
+      if (!tbl[0].is_active) throw new Error(`Meja ${tbl[0].code} tidak aktif`);
+
       const [busy] = await conn.query(
         'SELECT order_no FROM orders WHERE table_id = ? AND status IN (?) LIMIT 1 FOR UPDATE',
         [table_id, ACTIVE_ORDER_STATUSES]

@@ -47,7 +47,8 @@ CREATE TABLE restaurant_tables (
   code     VARCHAR(10) NOT NULL UNIQUE,
   capacity TINYINT UNSIGNED NOT NULL DEFAULT 4,
   area     VARCHAR(30) NULL,
-  status   ENUM('kosong','terisi','menunggu_bayar','reservasi') NOT NULL DEFAULT 'kosong'
+  status   ENUM('kosong','terisi','menunggu_bayar','reservasi') NOT NULL DEFAULT 'kosong',
+  is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = meja dinonaktifkan (tidak tampil di denah)'
 ) ENGINE=InnoDB;
 
 CREATE TABLE payment_methods (

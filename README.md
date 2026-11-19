@@ -1,6 +1,6 @@
 # Kasir Restoran
 
-Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok dan menu, reservasi meja, dan dashboard penjualan.
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, dan meja, reservasi meja, dan dashboard penjualan.
 
 **Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
@@ -235,6 +235,22 @@ Klik sebuah baris (atau meja biru di denah) untuk membuka rincian dan semua aksi
 
 > ⚠️ Fitur ini menambah tabel `reservations`. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Migrasi juga mengembalikan meja T08 dan T11 dari status "reservasi" bawaan data awal (yang tidak punya reservasi nyata) ke *Kosong*.
 
+### Kelola Meja
+
+Tombol **⚙️ Atur Meja** di kartu **Denah Meja** hanya muncul untuk **Admin** dan **Supervisor** (kasir tidak melihatnya, dan server menolak permintaannya). Isinya dialog daftar meja untuk menambah, mengubah, dan menghentikan pemakaian meja tanpa SQL.
+
+| Aksi | Hasilnya |
+|---|---|
+| **Tambah** | Isi kode (maksimal 10 karakter, tidak boleh kembar), jumlah kursi (1-50), dan area (opsional, mis. Indoor / Outdoor / VIP). Meja baru langsung muncul di denah sebagai *Kosong*. |
+| **Ubah** | Mengubah kode, kursi, dan area. Boleh dilakukan saat meja sedang dipakai; nama kode di pesanan dan reservasi lama ikut berubah. |
+| **Nonaktifkan / Aktifkan** | Meja nonaktif hilang dari denah, daftar meja di **Pesanan Baru**, dan pilihan meja di form reservasi. Meja **tidak dihapus**, jadi riwayat pesanan dan reservasinya tetap utuh, dan meja bisa diaktifkan kembali kapan saja. |
+
+- **Meja yang sedang dipakai tidak bisa dinonaktifkan:** ada pesanan aktif, ada reservasi yang menunggu, atau ada tamu reservasi yang sudah duduk tetapi belum memesan. Tombolnya mati dan keterangannya menyebut apa yang harus diselesaikan dulu.
+- Kode meja nonaktif tetap dianggap terpakai. Kalau kamu menambah meja dengan kode itu, aplikasi menyarankan mengaktifkan kembali meja lamanya.
+- Urutan meja di denah mengikuti urutan pembuatan. Belum ada pengaturan tata letak atau penggabungan meja.
+
+> ⚠️ Fitur ini menambah kolom `is_active` pada tabel meja. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Semua meja lama tetap aktif dan data tidak berubah.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -257,7 +273,7 @@ Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan d
 
 ### Setelah `git pull` (memperbarui kode)
 
-> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` belum ada).
+> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada).
 
 Urutan yang aman:
 
@@ -337,7 +353,7 @@ Database belum siap. Cek `docker compose ps` sampai `healthy`, lalu ulangi.
 **`Access denied for user 'root'`**
 `MYSQL_ROOT_PASSWORD` harus sama dengan `DB_PASSWORD` di `.env`. MySQL hanya membaca password saat pertama kali dibuat, jadi kalau kamu mengubahnya setelah database ada, jalankan `npm run db:reset` lalu `npm run db:seed`.
 
-**`Table 'kasir_restoran.stock_movements' doesn't exist` atau `...reservations' doesn't exist` (atau tabel lain "doesn't exist") saat bayar / void, atau denah meja dan daftar reservasi tidak mau muncul**
+**`Table 'kasir_restoran.stock_movements' doesn't exist`, `...reservations' doesn't exist`, atau `Unknown column 'is_active'` (atau tabel/kolom lain yang tidak ada) saat bayar / void, atau denah meja dan daftar reservasi tidak mau muncul**
 Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu coba lagi. Data tidak hilang.
 
 **Login selalu gagal dengan "Username atau password salah"**

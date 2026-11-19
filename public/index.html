@@ -364,11 +364,14 @@
         <div class="card">
           <div class="card-title-bar">
             <div class="card-title">🪑 Denah Meja Dine-in</div>
-            <div style="display:flex;gap:10px;font-size:11px;">
-              <span style="color:var(--success);">● Kosong</span>
-              <span style="color:var(--warning);">● Terisi</span>
-              <span style="color:var(--danger);">● Menunggu Bayar</span>
-              <span style="color:var(--info);">● Reservasi</span>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end;">
+              <div style="display:flex;gap:10px;font-size:11px;">
+                <span style="color:var(--success);">● Kosong</span>
+                <span style="color:var(--warning);">● Terisi</span>
+                <span style="color:var(--danger);">● Menunggu Bayar</span>
+                <span style="color:var(--info);">● Reservasi</span>
+              </div>
+              <button class="btn btn-subtle btn-touch" id="btn-manage-tables" style="display:none;" onclick="openTablesAdmin()">⚙️ Atur Meja</button>
             </div>
           </div>
           <div class="table-grid" id="tables-container"></div>
@@ -728,6 +731,29 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
         <button class="btn btn-subtle" onclick="closeModal('modal-correction')">Batal</button>
         <button class="btn btn-primary" id="btn-correct-save" onclick="submitCorrection()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ATUR MEJA (admin / supervisor) -->
+  <div class="modal-overlay" id="modal-tables-admin">
+    <div class="modal-card" style="max-width:520px;">
+      <div class="card-title" style="margin-bottom:4px;">⚙️ Atur Meja</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Meja nonaktif hilang dari denah, Pesanan Baru, dan reservasi, tetapi riwayatnya tetap ada. Meja yang sedang dipakai tidak bisa dinonaktifkan.</div>
+      <div id="tbl-admin-list"></div>
+      <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;">
+        <input type="text" class="modal-input" id="tbl-new-code" maxlength="10" placeholder="Kode (cth: T13)" autocomplete="off" aria-label="Kode meja"
+          style="width:auto;flex:1 1 100px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addTable();}">
+        <input type="number" class="modal-input" id="tbl-new-cap" min="1" max="50" step="1" inputmode="numeric" placeholder="Kursi" aria-label="Kapasitas"
+          style="width:auto;flex:0 0 84px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addTable();}">
+        <input type="text" class="modal-input" id="tbl-new-area" list="tbl-area-list" maxlength="30" placeholder="Area (opsional)" autocomplete="off" aria-label="Area"
+          style="width:auto;flex:1 1 130px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addTable();}">
+        <button class="btn btn-primary btn-touch" onclick="addTable()">Tambah</button>
+      </div>
+      <datalist id="tbl-area-list"></datalist>
+      <div class="field-error" id="tbl-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-tables-admin')">Tutup</button>
       </div>
     </div>
   </div>
@@ -1356,6 +1382,11 @@
     function renderTables() {
       const container = document.getElementById("tables-container");
       container.innerHTML = "";
+
+      if (tables.length === 0) {
+        container.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);font-size:12px;padding:18px 0;">Belum ada meja aktif. Admin atau supervisor bisa menambahkannya lewat ⚙️ Atur Meja.</div>`;
+        return;
+      }
 
       tables.forEach(tbl => {
         const div = document.createElement("div");
@@ -3385,6 +3416,8 @@
     function applyRoleUi() {
       const btn = document.getElementById("tab-btn-kelolamenu");
       if (btn) btn.style.display = canManageMenu() ? "" : "none";
+      const tablesBtn = document.getElementById("btn-manage-tables"); // "Atur Meja" on the floor-plan card
+      if (tablesBtn) tablesBtn.style.display = canManageMenu() ? "" : "none";
       if (!canManageMenu() && currentTab === "kelolamenu") switchTab("meja");
     }
 
@@ -3739,6 +3772,169 @@
       });
       if (!ok) return;
       await runCategoryAction(() => api(`/api/admin/categories/${id}`, { method: 'DELETE' }), `Kategori ${cat.name} dihapus`);
+    }
+
+    // ---------- KELOLA MEJA (admin / supervisor) ----------
+    // "Atur Meja" dialog on the floor-plan card. The server enforces the role and the rules; this only shows them.
+    let adminTables = [];
+    let tableEditId = null;
+    let tableBusy = false;
+
+    async function openTablesAdmin() {
+      if (!canManageMenu()) return;
+      tableEditId = null;
+      document.getElementById("tbl-error").textContent = "";
+      ["tbl-new-code", "tbl-new-cap", "tbl-new-area"].forEach(id => { document.getElementById(id).value = ""; });
+      openModal("modal-tables-admin");
+      document.querySelector("#modal-tables-admin .modal-card").scrollTop = 0;
+      await fetchAdminTables();
+    }
+
+    async function fetchAdminTables() {
+      if (!canManageMenu()) return;
+      try {
+        adminTables = await api('/api/admin/tables');
+        renderTablesAdmin();
+      } catch (e) {}
+    }
+
+    // Re-sync everything that shows tables: floor plan, "Pesanan Baru", the reservation form and this dialog
+    async function afterTableChange() {
+      await Promise.all([fetchTables(), fetchAdminTables(), fetchReservations()]);
+    }
+
+    function renderTablesAdmin() {
+      const areas = [...new Set(adminTables.map(t => t.area).filter(Boolean))];
+      document.getElementById("tbl-area-list").innerHTML = areas.map(a => `<option value="${esc(a)}"></option>`).join("");
+
+      const list = document.getElementById("tbl-admin-list");
+      if (adminTables.length === 0) {
+        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:14px 0;">Belum ada meja.</div>`;
+        return;
+      }
+      list.innerHTML = adminTables.map(t => {
+        if (tableEditId === t.id) {
+          return `<div class="cat-row">
+            <input type="text" class="modal-input" id="tbl-edit-code" maxlength="10" value="${esc(t.code)}" aria-label="Kode meja" style="width:auto;flex:1 1 90px;"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditTable(${t.id});}else if(event.key==='Escape'){cancelEditTable();}">
+            <input type="number" class="modal-input" id="tbl-edit-cap" min="1" max="50" step="1" value="${t.capacity}" aria-label="Kapasitas" style="width:auto;flex:0 0 76px;"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditTable(${t.id});}else if(event.key==='Escape'){cancelEditTable();}">
+            <input type="text" class="modal-input" id="tbl-edit-area" list="tbl-area-list" maxlength="30" value="${esc(t.area || "")}" aria-label="Area" style="width:auto;flex:1 1 110px;"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditTable(${t.id});}else if(event.key==='Escape'){cancelEditTable();}">
+            <button class="btn btn-primary btn-touch" onclick="saveEditTable(${t.id})">Simpan</button>
+            <button class="btn btn-subtle btn-touch" onclick="cancelEditTable()">Batal</button>
+          </div>`;
+        }
+        const inactive = !t.is_active;
+        const busy = !!t.in_use_reason;
+        const meta = `${t.capacity} kursi${t.area ? ` • ${esc(t.area)}` : ""}${busy ? ` • <span style="color:var(--warning);">sedang dipakai</span>` : ""}`;
+        const toggle = inactive
+          ? `<button class="btn btn-subtle btn-touch" onclick="toggleTableActive(${t.id}, true)">Aktifkan</button>`
+          : `<button class="btn btn-subtle btn-touch" ${busy ? `disabled title="${esc(t.in_use_reason)}"` : ""} onclick="toggleTableActive(${t.id}, false)">Nonaktifkan</button>`;
+        return `<div class="cat-row${inactive ? " mm-row-inactive" : ""}">
+          <div class="cat-name"><strong>${esc(t.code)}</strong><span class="cat-count">${meta}</span></div>
+          <span class="status-badge" style="${inactive ? "background:var(--text-muted);" : "background:var(--success);"}">${inactive ? "Nonaktif" : "Aktif"}</span>
+          <button class="btn btn-subtle btn-touch" onclick="startEditTable(${t.id})">Ubah</button>
+          ${toggle}
+        </div>`;
+      }).join("");
+    }
+
+    // Runs one table request; errors are shown inside the dialog. Returns true on success.
+    async function runTableAction(request, successMsg) {
+      if (tableBusy) return false;
+      tableBusy = true;
+      const errEl = document.getElementById("tbl-error");
+      errEl.textContent = "";
+      try {
+        await request();
+        if (successMsg) showToast(successMsg);
+        await afterTableChange();
+        return true;
+      } catch (e) {
+        errEl.textContent = e.message;
+        return false;
+      } finally {
+        tableBusy = false;
+      }
+    }
+
+    // Reads code / capacity / area from three inputs: { value } or { error, field }
+    function readTableFields(codeId, capId, areaId) {
+      const code = document.getElementById(codeId).value.trim();
+      if (!code) return { error: "Kode meja wajib diisi", field: codeId };
+      if (code.length > 10) return { error: "Kode meja maksimal 10 karakter", field: codeId };
+      const capEl = document.getElementById(capId);
+      const cap = parseStockInput(capEl.value, { min: 1, max: 50, label: "Kapasitas", badInput: capEl.validity.badInput });
+      if (cap.error) return { error: cap.error, field: capId };
+      const area = document.getElementById(areaId).value.trim();
+      if (area.length > 30) return { error: "Area maksimal 30 karakter", field: areaId };
+      return { value: { code, capacity: cap.value, area: area || null } };
+    }
+
+    async function addTable() {
+      const r = readTableFields("tbl-new-code", "tbl-new-cap", "tbl-new-area");
+      const errEl = document.getElementById("tbl-error");
+      if (r.error) {
+        errEl.textContent = r.error;
+        document.getElementById(r.field).focus();
+        return;
+      }
+      const ok = await runTableAction(
+        () => api('/api/admin/tables', { method: 'POST', body: JSON.stringify(r.value) }),
+        `Meja ${r.value.code} ditambahkan`
+      );
+      if (ok) {
+        ["tbl-new-code", "tbl-new-cap", "tbl-new-area"].forEach(id => { document.getElementById(id).value = ""; });
+        document.getElementById("tbl-new-code").focus();
+      }
+    }
+
+    function startEditTable(id) {
+      tableEditId = id;
+      document.getElementById("tbl-error").textContent = "";
+      renderTablesAdmin();
+      const input = document.getElementById("tbl-edit-code");
+      if (input) { input.focus(); input.select(); }
+    }
+
+    function cancelEditTable() {
+      tableEditId = null;
+      document.getElementById("tbl-error").textContent = "";
+      renderTablesAdmin();
+    }
+
+    async function saveEditTable(id) {
+      const r = readTableFields("tbl-edit-code", "tbl-edit-cap", "tbl-edit-area");
+      const errEl = document.getElementById("tbl-error");
+      if (r.error) {
+        errEl.textContent = r.error;
+        document.getElementById(r.field).focus();
+        return;
+      }
+      const ok = await runTableAction(
+        () => api(`/api/admin/tables/${id}`, { method: 'PUT', body: JSON.stringify(r.value) }),
+        `Meja ${r.value.code} diperbarui`
+      );
+      if (ok) { tableEditId = null; renderTablesAdmin(); }
+    }
+
+    async function toggleTableActive(id, makeActive) {
+      const t = adminTables.find(x => x.id === id);
+      if (!t) return;
+      if (!makeActive) {
+        const yes = await askConfirm({
+          title: "Nonaktifkan meja?",
+          message: `Meja ${t.code} tidak akan muncul lagi di denah, Pesanan Baru, dan reservasi. Riwayat pesanan dan reservasinya tidak berubah. Meja bisa diaktifkan kembali kapan saja.`,
+          okLabel: "Nonaktifkan",
+          danger: true
+        });
+        if (!yes) return;
+      }
+      await runTableAction(
+        () => api(`/api/admin/tables/${id}/active`, { method: 'PATCH', body: JSON.stringify({ is_active: makeActive }) }),
+        makeActive ? `Meja ${t.code} diaktifkan kembali` : `Meja ${t.code} dinonaktifkan`
+      );
     }
 
     // 11. Notifications
