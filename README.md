@@ -1,150 +1,276 @@
-# Restaurant Cashier Dashboard (Kasir Restoran)
+# Kasir Restoran
 
-A modern restaurant POS cashier dashboard backend and frontend built with Node.js, Express, MySQL 8, and vanilla HTML/CSS/JS.
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, dan dashboard penjualan.
 
-## Prerequisites
-
-- **Node.js**: v18 or higher
-- **Docker**: Docker Desktop or Rancher Desktop (using `dockerd` / moby container engine) with Docker Compose v2
+**Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
 ---
 
-## Quick Start
+## Daftar Isi
 
-Follow these steps to run the application for the first time:
-
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd restoran
-   ```
-
-2. **Install Node.js dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables:**
-   - On Windows:
-     ```cmd
-     copy .env.example .env
-     ```
-   - On macOS / Linux:
-     ```bash
-     cp .env.example .env
-     ```
-
-4. **Start the MySQL database container:**
-   ```bash
-   npm run db:up
-   ```
-
-5. **Wait until the database container is healthy:**
-   ```bash
-   docker compose ps
-   ```
-   *(Wait until the status displays `healthy`)*
-
-6. **Seed users with bcrypt hashes:**
-   ```bash
-   npm run db:seed
-   ```
-
-7. **Start the Node.js server:**
-   ```bash
-   node server.js
-   ```
-
-8. **Open the dashboard in your browser:**
-   Navigate to [http://localhost:3000](http://localhost:3000)
+1. [Yang Perlu Disiapkan](#1-yang-perlu-disiapkan)
+2. [Instalasi Langkah demi Langkah](#2-instalasi-langkah-demi-langkah)
+3. [Login ke Aplikasi](#3-login-ke-aplikasi)
+4. [Menjalankan Lagi di Hari Berikutnya](#4-menjalankan-lagi-di-hari-berikutnya)
+5. [Perintah Database](#5-perintah-database)
+6. [Masalah Umum (Troubleshooting)](#6-masalah-umum-troubleshooting)
+7. [Opsional: Semua Jalan di Docker](#7-opsional-semua-jalan-di-docker)
+8. [Struktur Proyek](#8-struktur-proyek)
 
 ---
 
-## Credentials
+## 1. Yang Perlu Disiapkan
 
-Usernames: `budi`, `sari` (kasir), `spv` (supervisor), `admin` (admin).
+Pasang dua aplikasi ini dulu, lalu pastikan keduanya berjalan:
 
-`npm run db:seed` generates a **random** password (all users) and a random 4-digit PIN (supervisor/admin) and prints them once in the console. To choose your own, set them before seeding:
+| Kebutuhan | Versi | Cara cek |
+|---|---|---|
+| [Node.js](https://nodejs.org) | 18 atau lebih baru | `node -v` |
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Compose v2 | `docker compose version` |
+
+> **Penting:** buka aplikasi Docker Desktop dan tunggu sampai statusnya *running* sebelum lanjut. Kalau Docker belum menyala, perintah `npm run db:up` akan gagal.
+
+Semua perintah di bawah dijalankan di **terminal** (PowerShell di Windows, Terminal di macOS/Linux) dari dalam folder proyek.
+
+---
+
+## 2. Instalasi Langkah demi Langkah
+
+Cukup dilakukan **sekali** saat pertama kali.
+
+### Langkah 1: Unduh proyek
+
+```bash
+git clone https://github.com/justLiunik/restoran.git
+cd restoran
+```
+
+### Langkah 2: Pasang dependensi
+
+```bash
+npm install
+```
+
+### Langkah 3: Buat file `.env`
+
+File `.env` berisi pengaturan rahasia milikmu. File ini **tidak ikut di-upload ke Git**. Salin dari contoh yang tersedia:
+
+Windows (PowerShell atau CMD):
 
 ```powershell
-$env:SEED_PASSWORD = "your-strong-password"; $env:SEED_PIN = "4821"; npm run db:seed
+copy .env.example .env
 ```
 
-### JWT secret
-
-The server refuses to start without a strong `JWT_SECRET` (min. 32 chars) in `.env`. Generate one with:
+macOS / Linux:
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+cp .env.example .env
 ```
 
----
+### Langkah 4: Isi `JWT_SECRET` di `.env`
 
-## Database
+`JWT_SECRET` adalah kunci rahasia untuk menandatangani token login. Server **tidak mau menyala** kalau nilainya kosong atau kurang dari 32 karakter.
 
-### Connecting with DBeaver / HeidiSQL / GUI Tools
-- **Host:** `localhost`
-- **Port:** `3307` (mapped to container's internal 3306)
-- **User:** `root`
-- **Password:** value of `DB_PASSWORD` in `.env` (default: `rootpass`)
-- **Database:** `kasir_restoran`
+1. Buat kunci acak dengan perintah ini:
 
-### Database Management Commands
-- **Start database:**
-  ```bash
-  npm run db:up
-  ```
-- **Stop database:**
-  ```bash
-  npm run db:down
-  ```
-- **View container logs:**
-  ```bash
-  npm run db:logs
-  ```
-- **Open interactive MySQL shell:**
-  ```bash
-  npm run db:shell
-  ```
-- **Reset database (wipes all data & re-runs `database/kasir_restoran.sql`):**
-  ```bash
-  npm run db:reset
-  ```
-- **Export current database changes back to `database/kasir_restoran.sql`:**
-  ```bash
-  npm run db:dump
-  ```
-  *(After dumping changes, review and commit `database/kasir_restoran.sql` to Git)*
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+   ```
 
----
+2. Salin hasilnya (teks panjang berisi huruf dan angka).
+3. Buka file `.env`, lalu tempel di belakang `JWT_SECRET=`, misalnya:
 
-## Important Notes
+   ```
+   JWT_SECRET=a3f9...teks-panjang-hasil-tadi...c1d2
+   ```
 
-- **Initial SQL Execution:** The initialization script `database/kasir_restoran.sql` runs **only once** on the first container startup when the volume `dbdata` is empty.
-- **Applying Schema Changes:** Modifying `database/kasir_restoran.sql` does not update an already initialized volume. To apply schema updates, run `npm run db:reset` (caution: this deletes all existing container data).
-- **DROP DATABASE Caution:** `database/kasir_restoran.sql` starts with `DROP DATABASE IF EXISTS kasir_restoran;`. Never run this script manually against a production database holding live data.
-- **Security:** Never commit `.env` containing sensitive credentials to Git. Keep `.env.example` updated with safe placeholder values.
+Pengaturan lain di `.env` (database, port) boleh dibiarkan seperti bawaan.
 
----
+### Langkah 5: Nyalakan database
 
-## Troubleshooting
-
-- **Port 3307 already in use:**
-  If port `3307` is occupied by another service on your host, edit `DB_PORT` in your `.env` file (e.g. `DB_PORT=3308`), then restart the container with `npm run db:up`.
-- **"Access denied for user 'root'":**
-  Ensure `MYSQL_ROOT_PASSWORD` matches `DB_PASSWORD` in `.env`. Note that MySQL initializes the root password only on first startup. If you changed the password in `.env` after the volume was already created, run `npm run db:reset` to recreate the volume with the new password.
-- **Container unhealthy:**
-  Check the database startup logs to diagnose the issue:
-  ```bash
-  npm run db:logs
-  ```
-
----
-
-## Optional: Full Stack in Docker
-
-To run both MySQL and the Node.js app inside Docker containers:
 ```bash
-docker compose --profile full up -d
+npm run db:up
 ```
-The application will be accessible at [http://localhost:3000](http://localhost:3000).
+
+Perintah ini mengunduh dan menjalankan MySQL di Docker. Pertama kali bisa memakan waktu beberapa menit karena ada unduhan.
+
+### Langkah 6: Tunggu database siap
+
+```bash
+docker compose ps
+```
+
+Lihat kolom `STATUS` pada baris `kasir-db`. Tunggu sampai tertulis **`healthy`** (sekitar 30-60 detik). Jalankan lagi perintahnya kalau masih `starting`.
+
+### Langkah 7: Buat password dan PIN pengguna
+
+```bash
+npm run db:seed
+```
+
+Perintah ini membuat **password acak** untuk semua pengguna dan **PIN 4 digit acak** untuk supervisor/admin, lalu menampilkannya **sekali saja**:
+
+```
+✅ User hashes successfully seeded!
+ℹ️ Password (semua user): xxxxxxxxxxxx
+ℹ️ PIN (supervisor/admin): 0000
+```
+
+**Catat keduanya sekarang**, karena tidak akan ditampilkan lagi. Kalau lupa, jalankan `npm run db:seed` lagi untuk membuat yang baru.
+
+Kalau mau menentukan sendiri password dan PIN-nya (password minimal 8 karakter, PIN tepat 4 angka):
+
+```powershell
+# Windows PowerShell
+$env:SEED_PASSWORD = "passwordKuat123"; $env:SEED_PIN = "4821"; npm run db:seed
+```
+
+```bash
+# macOS / Linux
+SEED_PASSWORD="passwordKuat123" SEED_PIN="4821" npm run db:seed
+```
+
+### Langkah 8: Jalankan server
+
+```bash
+npm start
+```
+
+Kalau berhasil, muncul tulisan:
+
+```
+🚀 Kasir Restoran server running on http://localhost:3000
+```
+
+### Langkah 9: Buka aplikasi
+
+Buka browser ke **http://localhost:3000**, lalu login (lihat bagian berikut). Biarkan terminal tetap terbuka selama aplikasi dipakai. Tekan `Ctrl + C` untuk menghentikan server.
+
+---
+
+## 3. Login ke Aplikasi
+
+| Username | Peran | Keterangan |
+|---|---|---|
+| `budi` | Kasir | Transaksi harian |
+| `sari` | Kasir | Transaksi harian |
+| `spv` | Supervisor | Punya PIN untuk otorisasi |
+| `admin` | Admin | Punya PIN untuk otorisasi |
+
+- **Password:** yang ditampilkan di Langkah 7 (sama untuk semua pengguna).
+- **PIN:** yang ditampilkan di Langkah 7. PIN diminta saat kasir memberi **diskon di atas 20%** atau **membatalkan (void) transaksi**, lalu supervisor atau admin memasukkan PIN-nya.
+
+> Password dan PIN hanya untuk pengembangan lokal. Kalau aplikasi dipasang di server sungguhan, ganti dengan nilai yang kuat lewat `SEED_PASSWORD` dan `SEED_PIN`.
+
+---
+
+## 4. Menjalankan Lagi di Hari Berikutnya
+
+Instalasi tidak perlu diulang. Cukup:
+
+1. Pastikan Docker Desktop menyala.
+2. Nyalakan database dan server:
+
+   ```bash
+   npm run db:up
+   npm start
+   ```
+
+3. Buka http://localhost:3000.
+
+Data tetap tersimpan di volume Docker (`dbdata`) walaupun komputer dimatikan.
+
+Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan database. Data **tidak** hilang.
+
+---
+
+## 5. Perintah Database
+
+| Perintah | Fungsi |
+|---|---|
+| `npm run db:up` | Menyalakan database |
+| `npm run db:down` | Mematikan database (data aman) |
+| `npm run db:logs` | Melihat log database (`Ctrl + C` untuk keluar) |
+| `npm run db:shell` | Membuka MySQL interaktif (diminta password root, yaitu `DB_PASSWORD` di `.env`) |
+| `npm run db:seed` | Membuat ulang password dan PIN semua pengguna |
+| `npm run db:reset` | **Menghapus semua data** dan membuat ulang database dari `database/kasir_restoran.sql`. Setelahnya jalankan `npm run db:seed` lagi |
+| `npm run db:dump` | Mengekspor kondisi database sekarang ke `database/kasir_restoran.sql` |
+
+### Menyambungkan dengan DBeaver / HeidiSQL
+
+| Isian | Nilai |
+|---|---|
+| Host | `localhost` |
+| Port | `3307` |
+| User | `root` |
+| Password | isi `DB_PASSWORD` di `.env` (bawaan: `rootpass`) |
+| Database | `kasir_restoran` |
+
+### Hal yang perlu diketahui
+
+- File `database/kasir_restoran.sql` hanya dijalankan **sekali**, yaitu saat database pertama kali dibuat (volume masih kosong). Kalau file ini diubah, jalankan `npm run db:reset` agar perubahannya dipakai (data lama terhapus).
+- File itu diawali `DROP DATABASE IF EXISTS kasir_restoran;`. Jangan pernah menjalankannya manual ke database yang berisi data asli.
+- Jangan pernah meng-commit file `.env` ke Git.
+
+---
+
+## 6. Masalah Umum (Troubleshooting)
+
+**`JWT_SECRET belum diatur atau terlalu lemah` saat `npm start`**
+`JWT_SECRET` di `.env` masih kosong atau kurang dari 32 karakter. Ulangi [Langkah 4](#langkah-4-isi-jwt_secret-di-env).
+
+**`Cannot connect to the Docker daemon` / `docker: error during connect`**
+Docker Desktop belum menyala. Buka aplikasinya, tunggu sampai *running*, lalu ulangi `npm run db:up`.
+
+**`Port 3307 is already in use`**
+Port itu dipakai aplikasi lain. Ubah `DB_PORT` di `.env` (misalnya `DB_PORT=3308`), lalu jalankan `npm run db:up` lagi.
+
+**`EADDRINUSE: address already in use :::3000`**
+Port 3000 sedang dipakai. Tutup server lain yang berjalan, atau ubah `PORT` di `.env`.
+
+**`ECONNREFUSED` atau gagal terhubung ke database saat `db:seed` / `npm start`**
+Database belum siap. Cek `docker compose ps` sampai `healthy`, lalu ulangi.
+
+**`Access denied for user 'root'`**
+`MYSQL_ROOT_PASSWORD` harus sama dengan `DB_PASSWORD` di `.env`. MySQL hanya membaca password saat pertama kali dibuat, jadi kalau kamu mengubahnya setelah database ada, jalankan `npm run db:reset` lalu `npm run db:seed`.
+
+**Login selalu gagal dengan "Username atau password salah"**
+Password hasil `db:seed` hanya muncul sekali. Jalankan `npm run db:seed` lagi dan pakai password baru yang tampil.
+
+**Database `unhealthy` atau tidak mau jalan**
+Lihat penyebabnya dengan `npm run db:logs`.
+
+---
+
+## 7. Opsional: Semua Jalan di Docker
+
+Kalau mau aplikasi **dan** database sama-sama berjalan di Docker (tanpa `npm start`):
+
+```bash
+docker compose --profile full up -d --build
+```
+
+Syaratnya `JWT_SECRET` sudah terisi di `.env`. Setelah database `healthy`, buat password dan PIN dari komputermu (database terbuka di port 3307):
+
+```bash
+npm run db:seed
+```
+
+Aplikasi bisa dibuka di http://localhost:3000.
+
+---
+
+## 8. Struktur Proyek
+
+```
+restoran/
+├── server.js                    # Server Express dan semua endpoint API
+├── db.js                        # Koneksi MySQL
+├── seed-users.js                # Pembuat password dan PIN pengguna
+├── public/index.html            # Tampilan aplikasi (frontend)
+├── database/kasir_restoran.sql  # Skema dan data awal database
+├── docker-compose.yml           # Konfigurasi MySQL (dan app, profil "full")
+├── Dockerfile                   # Image Docker untuk aplikasi
+├── .env.example                 # Contoh pengaturan; salin menjadi .env
+└── package.json                 # Dependensi dan daftar perintah npm
+```
