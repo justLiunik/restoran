@@ -43,6 +43,63 @@ function calculateOrderTotals(items, discountPercent = 0, orderType = 'dine_in')
   };
 }
 
+// Normalizes a free-text item note: collapse whitespace, trim, max 255 chars (column limit). Empty -> null.
+function cleanNote(note) {
+  const s = String(note ?? '').replace(/\s+/g, ' ').trim().slice(0, 255);
+  return s || null;
+}
+
+// Validates requested items and snapshots product data.
+// Lines are merged by product + note (same product with a different note stays a separate line).
+// Stock is checked against the total quantity requested per product.
+async function buildOrderItems(conn, items, priceSnapshot = new Map()) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Pesanan harus memiliki minimal 1 item');
+  }
+
+  const merged = new Map();
+  for (const it of items) {
+    const productId = Number(it.product_id);
+    const qty = Math.floor(Number(it.qty));
+    if (!productId || !(qty >= 1)) throw new Error('Item pesanan tidak valid');
+    const note = cleanNote(it.note);
+    const key = `${productId}|${(note || '').toLowerCase()}`;
+    const prev = merged.get(key);
+    if (prev) prev.qty += qty;
+    else merged.set(key, { product_id: productId, qty, note });
+  }
+  const lines = [...merged.values()];
+
+  const productIds = [...new Set(lines.map(l => l.product_id))];
+  const [products] = await conn.query(
+    'SELECT id, name, price, stock, is_available FROM products WHERE id IN (?)',
+    [productIds]
+  );
+  const prodMap = new Map(products.map(p => [p.id, p]));
+
+  const qtyByProduct = new Map();
+  for (const l of lines) qtyByProduct.set(l.product_id, (qtyByProduct.get(l.product_id) || 0) + l.qty);
+  for (const [productId, totalQty] of qtyByProduct) {
+    const prod = prodMap.get(productId);
+    if (!prod) throw new Error(`Produk ID ${productId} tidak ditemukan`);
+    if (prod.stock < totalQty) throw new Error(`Stok ${prod.name} tidak mencukupi (sisa ${prod.stock})`);
+  }
+
+  return lines.map(l => {
+    const prod = prodMap.get(l.product_id);
+    return {
+      product_id: prod.id,
+      product_name: prod.name,
+      // keep the price already snapshotted on this order, if any
+      price: priceSnapshot.has(prod.id) ? priceSnapshot.get(prod.id) : prod.price,
+      qty: l.qty,
+      note: l.note
+    };
+  });
+}
+
+const ACTIVE_ORDER_STATUSES = ['baru', 'diproses', 'siap_saji', 'belum_dibayar', 'hold'];
+
 // Generates sequential zero-padded invoice number: INV-0001
 async function generateOrderNo(conn) {
   const [rows] = await conn.query('SELECT id, order_no FROM orders ORDER BY id DESC LIMIT 1 FOR UPDATE');
@@ -333,6 +390,17 @@ app.post('/api/orders', async (req, res) => {
       throw new Error('Pesanan harus memiliki minimal 1 item');
     }
 
+    // A dine-in table can only have one active order
+    if (order_type === 'dine_in' && table_id) {
+      const [busy] = await conn.query(
+        'SELECT order_no FROM orders WHERE table_id = ? AND status IN (?) LIMIT 1 FOR UPDATE',
+        [table_id, ACTIVE_ORDER_STATUSES]
+      );
+      if (busy.length > 0) {
+        throw new Error(`Meja sudah terisi oleh pesanan ${busy[0].order_no}`);
+      }
+    }
+
     // Check open shift for logged-in cashier
     const [shifts] = await conn.query(
       'SELECT id FROM shifts WHERE cashier_id = ? AND status = "open" LIMIT 1 FOR UPDATE',
@@ -345,28 +413,7 @@ app.post('/api/orders', async (req, res) => {
     const shiftId = shifts[0].id;
 
     // Snapshot products and calculate totals
-    const productIds = items.map(i => i.product_id);
-    const [products] = await conn.query(
-      'SELECT id, name, price, stock, is_available FROM products WHERE id IN (?)',
-      [productIds]
-    );
-    const prodMap = new Map(products.map(p => [p.id, p]));
-
-    const orderItemsData = [];
-    for (const item of items) {
-      const prod = prodMap.get(Number(item.product_id));
-      if (!prod) throw new Error(`Produk ID ${item.product_id} tidak ditemukan`);
-      if (prod.stock < item.qty) {
-        throw new Error(`Stok ${prod.name} tidak mencukupi (sisa ${prod.stock})`);
-      }
-      orderItemsData.push({
-        product_id: prod.id,
-        product_name: prod.name,
-        price: prod.price,
-        qty: Number(item.qty) || 1,
-        note: item.note || null
-      });
-    }
+    const orderItemsData = await buildOrderItems(conn, items);
 
     const totals = calculateOrderTotals(orderItemsData, discount_percent, order_type);
     const orderNo = await generateOrderNo(conn);
@@ -413,6 +460,52 @@ app.post('/api/orders', async (req, res) => {
     const [newOrder] = await db.query('SELECT * FROM orders WHERE id = ?', [orderId]);
     newOrder[0].items = orderItemsData;
     res.status(201).json(newOrder[0]);
+  } catch (err) {
+    await conn.rollback();
+    res.status(400).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// PUT /api/orders/:id { items: [{product_id, qty, note?}], discount_percent? }
+// Replaces the items of an unpaid order in one transaction ("Simpan Pesanan" on an existing order).
+app.put('/api/orders/:id', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const orderId = req.params.id;
+
+    const [orders] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [orderId]);
+    if (orders.length === 0) throw new Error('Pesanan tidak ditemukan');
+    const order = orders[0];
+    if (order.status === 'selesai' || order.status === 'void') {
+      throw new Error('Pesanan sudah selesai atau dibatalkan');
+    }
+
+    const [oldItems] = await conn.query('SELECT product_id, price FROM order_items WHERE order_id = ? ORDER BY id ASC', [orderId]);
+    const priceSnapshot = new Map();
+    oldItems.forEach(it => { if (!priceSnapshot.has(it.product_id)) priceSnapshot.set(it.product_id, it.price); });
+
+    const orderItemsData = await buildOrderItems(conn, req.body.items, priceSnapshot);
+    const discount = req.body.discount_percent !== undefined ? req.body.discount_percent : order.discount_percent;
+    const totals = calculateOrderTotals(orderItemsData, discount, order.order_type);
+
+    await conn.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
+    for (const it of orderItemsData) {
+      await conn.query(`
+        INSERT INTO order_items (order_id, product_id, product_name, price, qty, note)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [orderId, it.product_id, it.product_name, it.price, it.qty, it.note]);
+    }
+
+    await conn.query(`
+      UPDATE orders SET subtotal = ?, discount_percent = ?, discount_amount = ?, tax_amount = ?, service_amount = ?, total = ?
+      WHERE id = ?
+    `, [totals.subtotal, totals.discount_percent, totals.discount_amount, totals.tax_amount, totals.service_amount, totals.total, orderId]);
+
+    await conn.commit();
+    res.json({ ok: true, id: order.id, order_no: order.order_no, totals });
   } catch (err) {
     await conn.rollback();
     res.status(400).json({ error: err.message });
@@ -532,9 +625,12 @@ app.patch('/api/orders/:id/status', async (req, res) => {
     }
     const order = orders[0];
 
-    // If dine_in order set to 'belum_dibayar', set table to 'menunggu_bayar'
-    if (status === 'belum_dibayar' && order.order_type === 'dine_in' && order.table_id) {
-      await db.query('UPDATE restaurant_tables SET status = "menunggu_bayar" WHERE id = ?', [order.table_id]);
+    // Dine-in table follows the order: 'belum_dibayar' -> menunggu_bayar, any other active status -> terisi
+    if (order.order_type === 'dine_in' && order.table_id) {
+      await db.query(
+        'UPDATE restaurant_tables SET status = ? WHERE id = ?',
+        [status === 'belum_dibayar' ? 'menunggu_bayar' : 'terisi', order.table_id]
+      );
     }
 
     await db.query('UPDATE orders SET status = ? WHERE id = ?', [status, id]);

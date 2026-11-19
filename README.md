@@ -162,6 +162,23 @@ Buka browser ke **http://localhost:3000**, lalu login (lihat bagian berikut). Bi
 
 > Password dan PIN hanya untuk pengembangan lokal. Kalau aplikasi dipasang di server sungguhan, ganti dengan nilai yang kuat lewat `SEED_PASSWORD` dan `SEED_PIN`.
 
+### Alur Pesanan
+
+Membuat atau menyimpan pesanan butuh **shift yang sudah dibuka** (kasir `budi` sudah punya shift terbuka di data awal).
+
+| Aksi | Hasilnya |
+|---|---|
+| Klik meja kosong atau **+ Pesanan Baru** | Membuka pesanan baru di panel kanan. Belum tersimpan sampai kamu menekan salah satu tombol di bawah. |
+| **Simpan Pesanan** | Pesanan disimpan dengan status *Baru* (ke dapur), meja jadi *Terisi*, panel ditutup, dan pesanan muncul di Antrean Pesanan Berjalan. Nomor invoice berurutan (INV-0001, INV-0002, ...). |
+| Klik meja terisi, atau **Buka** pada daftar | Membuka lagi pesanan yang sudah tersimpan beserta item dan catatannya. Ubah, lalu **Simpan Pesanan** lagi untuk memperbarui. |
+| **Hold (tahan)** | Menyimpan pesanan sebagai *Hold* untuk pelanggan yang akan lanjut nanti. Muncul di tab **Hold** pada Antrean dengan tombol **Lanjutkan**. |
+| **Bayar & Cetak** | Pesanan baru maupun yang sudah tersimpan dibayar: status *Selesai*, meja kembali *Kosong*, stok berkurang, struk dicetak (lengkap dengan catatan item). |
+| **+ Catatan** pada item | Pilih chip cepat (Tidak pedas, Pedas, Tanpa es, Kurang manis, Dibungkus) dan/atau ketik catatan sendiri. Produk yang sama dengan catatan berbeda menjadi baris terpisah; catatan sama digabung. |
+
+- Saat menutup panel (✕), menekan **+ Pesanan Baru**, atau membuka meja/pesanan lain padahal ada perubahan yang belum disimpan, muncul pilihan **Simpan / Buang / Batal**.
+- Perubahan yang belum disimpan disimpan sementara di browser, jadi tidak hilang kalau halaman di-refresh.
+- Pesanan kosong tidak bisa disimpan, di-hold, atau dibayar.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
