@@ -1,6 +1,6 @@
 # Kasir Restoran
 
-Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, dan meja, reservasi meja, dan dashboard penjualan.
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, meja, dan user, reservasi meja, dan laporan penjualan (per periode, dengan ekspor CSV).
 
 **Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
@@ -108,15 +108,15 @@ Lihat kolom `STATUS` pada baris `kasir-db`. Tunggu sampai tertulis **`healthy`**
 npm run db:seed
 ```
 
-Perintah ini membuat **password acak** untuk semua pengguna dan **PIN 4 digit acak** untuk supervisor/admin, lalu menampilkannya **sekali saja**:
+Perintah ini membuat **password acak** untuk pengguna yang belum punya password sungguhan (pada instalasi baru: semua) dan **PIN 4 digit acak** untuk supervisor/admin, lalu menampilkannya **sekali saja**:
 
 ```
-✅ User hashes successfully seeded!
-ℹ️ Password (semua user): xxxxxxxxxxxx
-ℹ️ PIN (supervisor/admin): 0000
+✅ User hashes successfully seeded! (password: 4 user, PIN: 2 user; user lain tidak diubah)
+ℹ️ Password (user yang diisi): xxxxxxxxxxxx
+ℹ️ PIN (supervisor/admin yang diisi): 0000
 ```
 
-**Catat keduanya sekarang**, karena tidak akan ditampilkan lagi. Kalau lupa, jalankan `npm run db:seed` lagi untuk membuat yang baru.
+**Catat keduanya sekarang**, karena tidak akan ditampilkan lagi. Perintah ini **tidak menimpa** password dan PIN yang sudah diganti lewat aplikasi (Kelola User / Akun Saya). Kalau lupa dan ingin **menimpa semua** pengguna dengan yang baru, jalankan `npm run db:seed -- --all` (semua sesi login juga berakhir).
 
 Kalau mau menentukan sendiri password dan PIN-nya (password minimal 8 karakter, PIN tepat 4 angka):
 
@@ -157,7 +157,7 @@ Buka browser ke **http://localhost:3000**, lalu login (lihat bagian berikut). Bi
 | `spv` | Supervisor | Punya PIN untuk otorisasi |
 | `admin` | Admin | Punya PIN untuk otorisasi |
 
-- **Password:** yang ditampilkan di Langkah 7 (sama untuk semua pengguna).
+- **Password:** yang ditampilkan di Langkah 7 (sama untuk semua pengguna). Setelah masuk, admin bisa menambah akun dan mengganti password atau PIN lewat tab **Kelola User**, dan siapa pun bisa mengganti password sendiri lewat tombol **🔑** (lihat di bawah).
 - **PIN:** yang ditampilkan di Langkah 7. PIN diminta saat kasir memberi **diskon di atas 20%** atau **membatalkan (void) transaksi**, lalu supervisor atau admin memasukkan PIN-nya.
 
 > Password dan PIN hanya untuk pengembangan lokal. Kalau aplikasi dipasang di server sungguhan, ganti dengan nilai yang kuat lewat `SEED_PASSWORD` dan `SEED_PIN`.
@@ -251,6 +251,56 @@ Tombol **⚙️ Atur Meja** di kartu **Denah Meja** hanya muncul untuk **Admin**
 
 > ⚠️ Fitur ini menambah kolom `is_active` pada tabel meja. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Semua meja lama tetap aktif dan data tidak berubah.
 
+### Laporan Penjualan
+
+Tab **📊 Penjualan & Laporan** menampilkan laporan penjualan. Fitur ini tidak mengubah database, jadi `npm run db:migrate` tidak perlu dijalankan khusus untuknya.
+
+| Peran | Yang bisa dilakukan |
+|---|---|
+| **Kasir** | Melihat laporan **hari ini** saja. Permintaan periode lain ditolak server. |
+| **Admin / Supervisor** | Memilih periode (**Hari ini, Kemarin, 7 hari terakhir, Bulan ini, Bulan lalu**, atau tanggal **Dari** dan **Sampai**, paling lama 366 hari) dan mengunduh CSV. |
+
+**Isi laporan** (semuanya mengikuti periode yang dipilih):
+- **Ringkasan:** total penjualan, jumlah transaksi, rata-rata, subtotal, diskon, pajak, service, dan void (jumlah dan nilainya).
+- **Penjualan per hari** (periode lebih dari 1 hari; per bulan bila lebih dari 31 hari), **per metode bayar**, **per tipe pesanan** (Dine-in, Take Away, GoFood, GrabFood, ShopeeFood), **per kasir**, **per jam**, dan **menu terlaris** (10 teratas, bisa ditampilkan semua).
+- **Ekspor CSV:** **CSV Transaksi** (setiap nota selesai dan void pada periode itu) dan **CSV Menu** (jumlah terjual dan omzet per menu).
+
+**Cara menghitung:**
+- Yang dihitung hanya pesanan yang sudah dibayar (*Selesai*), menurut **tanggal pembayarannya**. Pesanan **void tidak masuk penjualan**; jumlahnya ditampilkan terpisah.
+- **Total penjualan sudah termasuk pajak dan service**, sama seperti kartu "Total Penjualan Hari Ini" di bagian atas halaman.
+- **Penjualan per metode bayar memakai nilai bersih:** kembalian tidak dihitung. Contoh: tagihan Rp 51.750 dibayar Tunai Rp 100.000 dicatat Tunai Rp 51.750. Untuk pembayaran ganda, kembalian dikurangkan dari bagian Tunai.
+- **Per kasir** berarti kasir yang menerima pembayaran, bukan yang membuka pesanan.
+- **Omzet menu** dihitung dari harga item sebelum diskon, pajak, dan service, jadi jumlahnya tidak sama dengan total penjualan.
+
+**Membuka CSV di Excel:** berkas memakai pemisah titik koma dan UTF-8, sehingga langsung terbuka rapi di Excel versi Indonesia (klik dua kali). Kalau memakai Excel bahasa Inggris dan semua isi tampil dalam satu kolom, pakai **Data → From Text/CSV** lalu pilih pemisah *Semicolon*. Teks yang diawali `=`, `+`, `-`, atau `@` diberi tanda petik di depannya supaya tidak dijalankan sebagai rumus.
+
+**Perbaikan kas shift:** angka "kas yang seharusnya" (saat tutup shift dan kartu **Shift Kasir Aktif** di atas) sebelumnya memakai uang yang diserahkan pelanggan, bukan uang yang benar-benar tersisa setelah kembalian, sehingga kasir yang menutup shift dengan uang yang benar melihat selisih minus. Sekarang kas dihitung dari nilai bersih: kas awal + penjualan tunai bersih + kas masuk − kas keluar.
+
+### Kelola User
+
+Tab **👥 Kelola User** hanya muncul untuk **Admin** (supervisor dan kasir tidak melihatnya, dan server menolak permintaannya). Di sini admin mengatur semua akun tanpa SQL atau `db:seed`.
+
+| Aksi | Hasilnya |
+|---|---|
+| **+ Tambah User** | Isi nama, username, peran, dan password awal. Supervisor dan admin **wajib** diberi PIN 4 digit; kasir tidak punya PIN. |
+| **Ubah** | Mengubah nama, username, dan peran. Kasir → supervisor/admin wajib mengisi PIN; menjadi kasir menghapus PIN. |
+| **Password** | Reset password user lain. Semua sesi login user itu berakhir seketika. |
+| **PIN** | Mengatur PIN supervisor/admin. PIN tidak boleh sama dengan PIN supervisor atau admin aktif lain, karena PIN dipakai untuk mencatat siapa yang menyetujui diskon besar dan void. |
+| **Nonaktifkan / Aktifkan** | Akun nonaktif tidak bisa login dan sesinya berakhir seketika. Akun tidak dihapus, jadi riwayat pesanan dan shiftnya tetap utuh. |
+
+**Aturan:**
+- **Username:** 3-30 karakter (huruf, angka, titik, garis bawah, strip), huruf besar otomatis jadi kecil, dan tidak boleh kembar. **Password:** 8-72 karakter.
+- Kamu tidak bisa menonaktifkan atau mengubah peran **akun sendiri**, dan **admin aktif terakhir** tidak bisa dinonaktifkan atau diturunkan. User yang **masih punya shift terbuka** tidak bisa dinonaktifkan (tutup shiftnya dulu).
+- **Mengaktifkan kembali** supervisor/admin menghapus PIN lamanya; atur PIN baru dengan tombol **PIN**.
+- **Berlaku seketika:** perubahan peran, nonaktifkan, dan reset password langsung berlaku tanpa menunggu token login habis. Tampilan pengguna yang sedang login ikut menyesuaikan dalam sekitar 15 detik.
+- Password dan PIN tidak pernah ditampilkan.
+
+### Akun Saya
+
+Tombol **🔑** di pojok atas (untuk semua peran) membuka **Akun Saya**: ganti **password** sendiri dan, untuk supervisor dan admin, ganti **PIN** sendiri. Keduanya meminta password saat ini. Setelah password diganti, login di perangkat lain berakhir, sedangkan sesi yang sedang dipakai tetap berjalan.
+
+> ⚠️ Fitur ini menambah kolom `session_version` pada tabel pengguna. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Semua akun, password, dan PIN tetap seperti semula, dan sesi yang sedang login tidak terputus.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -273,7 +323,7 @@ Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan d
 
 ### Setelah `git pull` (memperbarui kode)
 
-> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada).
+> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada; tanpa kolom `session_version` pada pengguna, semua permintaan gagal).
 
 Urutan yang aman:
 
@@ -310,7 +360,7 @@ Database harus menyala saat `db:migrate` dijalankan (`npm run db:up`). Tidak per
 | `npm run db:down` | Mematikan database (data aman) |
 | `npm run db:logs` | Melihat log database (`Ctrl + C` untuk keluar) |
 | `npm run db:shell` | Membuka MySQL interaktif (diminta password root, yaitu `DB_PASSWORD` di `.env`) |
-| `npm run db:seed` | Membuat ulang password dan PIN semua pengguna |
+| `npm run db:seed` | Mengisi password dan PIN pengguna yang belum punya (instalasi baru); tidak menimpa yang sudah diganti. `npm run db:seed -- --all` menimpa **semua** pengguna |
 | `npm run db:migrate` | Menambahkan tabel/kolom baru dari `database/migrations/` ke database yang sudah ada, **tanpa menghapus data**. Aman dijalankan berulang kali. Jalankan setelah memperbarui kode (`git pull`) |
 | `npm run db:reset` | **Menghapus semua data** dan membuat ulang database dari `database/kasir_restoran.sql`. Setelahnya jalankan `npm run db:seed` lagi |
 | `npm run db:dump` | Mengekspor kondisi database sekarang ke `database/kasir_restoran.sql` |
@@ -357,7 +407,13 @@ Database belum siap. Cek `docker compose ps` sampai `healthy`, lalu ulangi.
 Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu coba lagi. Data tidak hilang.
 
 **Login selalu gagal dengan "Username atau password salah"**
-Password hasil `db:seed` hanya muncul sekali. Jalankan `npm run db:seed` lagi dan pakai password baru yang tampil.
+Password hasil `db:seed` hanya muncul sekali. Kalau ada admin yang masih bisa login, minta ia mereset passwordmu di tab **Kelola User**. Kalau tidak ada, jalankan `npm run db:seed -- --all` dan pakai password baru yang tampil (ini menimpa password dan PIN **semua** pengguna).
+
+**Semua permintaan gagal atau muncul `Unknown column 'session_version'` setelah `git pull`**
+Database belum diperbarui. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data dan akun tidak berubah.
+
+**Tiba-tiba keluar sendiri ("Sesi berakhir" atau "Akun tidak aktif")**
+Itu disengaja: password akunmu baru direset atau diganti, atau akunmu dinonaktifkan oleh admin. Login lagi dengan password yang baru, atau minta admin mengaktifkan akunmu di tab **Kelola User**.
 
 **Database `unhealthy` atau tidak mau jalan**
 Lihat penyebabnya dengan `npm run db:logs`.

@@ -17,6 +17,7 @@ CREATE TABLE users (
   pin_hash      VARCHAR(255) NULL COMMENT 'PIN untuk otorisasi void/diskon besar (supervisor/admin)',
   role          ENUM('kasir','supervisor','admin') NOT NULL DEFAULT 'kasir',
   is_active     TINYINT(1) NOT NULL DEFAULT 1,
+  session_version INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'dinaikkan untuk mengakhiri semua sesi login user ini',
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 

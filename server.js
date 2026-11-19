@@ -513,20 +513,47 @@ async function generateOrderNo(conn) {
 
 // ---------- AUTH & MIDDLEWARE ----------
 
-// JWT Verification Middleware
-function authMiddleware(req, res, next) {
+// The login token (8 hours) carries { id, ..., sv }. Every request checks it against the database: the user must exist and
+// be active, `sv` must equal users.session_version (raised on password reset/change and on deactivation), and the ROLE
+// always comes from the database, so deactivating or demoting someone takes effect immediately. Tokens issued before
+// session_version existed carry no `sv` and count as 0.
+function signUserToken(user) {
+  return jwt.sign(
+    { id: user.id, username: user.username, name: user.name, role: user.role, sv: user.session_version },
+    JWT_SECRET,
+    { expiresIn: '8h' }
+  );
+}
+
+async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token otentikasi tidak ditemukan' });
   }
 
-  const token = authHeader.split(' ')[1];
+  let decoded;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
+    decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
   } catch (err) {
     return res.status(401).json({ error: 'Token tidak valid atau kedaluwarsa' });
+  }
+
+  try {
+    const [rows] = await db.query(
+      'SELECT id, name, username, role, is_active, session_version FROM users WHERE id = ?',
+      [decoded.id]
+    );
+    const user = rows[0];
+    if (!user || !user.is_active) {
+      return res.status(401).json({ error: 'Akun tidak aktif, silakan hubungi admin' });
+    }
+    if ((Number(decoded.sv) || 0) !== user.session_version) {
+      return res.status(401).json({ error: 'Sesi berakhir, silakan login kembali' });
+    }
+    req.user = { id: user.id, name: user.name, username: user.username, role: user.role };
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 }
 
@@ -539,7 +566,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     const [users] = await db.query(
-      'SELECT id, name, username, password_hash, role, is_active FROM users WHERE username = ?',
+      'SELECT id, name, username, password_hash, role, is_active, session_version FROM users WHERE username = ?',
       [username]
     );
 
@@ -553,11 +580,7 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Username atau password salah' });
     }
 
-    const token = jwt.sign(
-      { id: user.id, username: user.username, name: user.name, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '8h' }
-    );
+    const token = signUserToken(user);
 
     res.json({
       token,
@@ -1889,13 +1912,8 @@ app.get('/api/shifts/current', async (req, res) => {
 
     // Live calculations:
     // Cash payments in current shift
-    const [cashPayRows] = await db.query(`
-      SELECT COALESCE(SUM(p.amount), 0) AS total_cash_pay
-      FROM payments p
-      JOIN payment_methods pm ON pm.id = p.payment_method_id
-      WHERE p.shift_id = ? AND pm.name = 'Tunai'
-    `, [shift.id]);
-    const cashInPayments = Number(cashPayRows[0].total_cash_pay);
+    // cash that really stays in the drawer: what customers handed over minus the change given back
+    const cashInPayments = await shiftNetCash(db, shift.id);
 
     // Cash movements
     const [movementRows] = await db.query(`
@@ -1999,13 +2017,8 @@ app.post('/api/shifts/close', async (req, res) => {
 
     const shift = shifts[0];
 
-    const [cashPayRows] = await db.query(`
-      SELECT COALESCE(SUM(p.amount), 0) AS total_cash_pay
-      FROM payments p
-      JOIN payment_methods pm ON pm.id = p.payment_method_id
-      WHERE p.shift_id = ? AND pm.name = 'Tunai'
-    `, [shift.id]);
-    const cashInPayments = Number(cashPayRows[0].total_cash_pay);
+    // cash that really stays in the drawer: what customers handed over minus the change given back
+    const cashInPayments = await shiftNetCash(db, shift.id);
 
     const [movementRows] = await db.query(`
       SELECT
@@ -2039,6 +2052,602 @@ app.post('/api/shifts/close', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- USER MANAGEMENT ----------
+
+const USER_ROLES = ['kasir', 'supervisor', 'admin'];
+const PIN_ROLES = ['supervisor', 'admin']; // only these roles have a PIN (it authorises discounts above 20% and voids)
+const BCRYPT_ROUNDS = 10;
+
+const requireOnlyAdmin = (req, res, next) => (req.user && req.user.role === 'admin')
+  ? next()
+  : res.status(403).json({ error: 'Hanya admin yang dapat mengelola user' });
+
+function parseUsername(value) {
+  const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!/^[a-z0-9._-]{3,30}$/.test(v)) {
+    throw new HttpError(400, 'Username 3-30 karakter: huruf, angka, titik, garis bawah, atau strip');
+  }
+  return v;
+}
+
+function parsePassword(value, label = 'Password') {
+  if (typeof value !== 'string' || value === '') throw new HttpError(400, `${label} wajib diisi`);
+  if (value.length < 8) throw new HttpError(400, `${label} minimal 8 karakter`);
+  if (value.length > 72) throw new HttpError(400, `${label} maksimal 72 karakter`); // bcrypt only reads 72 bytes
+  return value;
+}
+
+function parsePin(value) {
+  if (typeof value !== 'string' || !/^\d{4}$/.test(value)) throw new HttpError(400, 'PIN harus 4 digit angka');
+  return value;
+}
+
+// POST/PUT /api/admin/users body. pin is only accepted for supervisor/admin and is required when CREATING one.
+function parseUserInput(body, { creating }) {
+  const b = body || {};
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) throw new HttpError(400, 'Nama wajib diisi');
+  if (name.length > 100) throw new HttpError(400, 'Nama maksimal 100 karakter');
+  const username = parseUsername(b.username);
+  if (!USER_ROLES.includes(b.role)) throw new HttpError(400, 'Peran harus kasir, supervisor, atau admin');
+
+  const out = { name, username, role: b.role };
+  if (creating) out.password = parsePassword(b.password);
+  const hasPin = b.pin !== undefined && b.pin !== null && b.pin !== '';
+  if (hasPin) {
+    if (b.role === 'kasir') throw new HttpError(400, 'Kasir tidak memiliki PIN');
+    out.pin = parsePin(b.pin);
+  } else if (creating && PIN_ROLES.includes(b.role)) {
+    throw new HttpError(400, 'PIN 4 digit wajib untuk supervisor dan admin');
+  }
+  return out;
+}
+
+// Two active supervisors/admins must never share a PIN (the PIN is how we know WHO authorised a void or a discount).
+// Check and save run under one server-wide named lock, so two admins can not save the same PIN at the same moment.
+async function withPinLock(fn) {
+  const conn = await db.getConnection();
+  try {
+    const [[lock]] = await conn.query("SELECT GET_LOCK('kasir_user_pin', 5) AS ok");
+    if (lock.ok !== 1) throw new HttpError(503, 'Server sedang sibuk, coba lagi sebentar');
+    try {
+      return await fn();
+    } finally {
+      await conn.query("SELECT RELEASE_LOCK('kasir_user_pin')");
+    }
+  } finally {
+    conn.release();
+  }
+}
+
+async function assertPinUnique(pin, exceptUserId = null) {
+  const [rows] = await db.query(
+    'SELECT pin_hash FROM users WHERE role IN ("supervisor", "admin") AND is_active = 1 AND pin_hash IS NOT NULL AND id <> ?',
+    [exceptUserId || 0]
+  );
+  for (const r of rows) {
+    if (await bcrypt.compare(pin, r.pin_hash)) {
+      throw new HttpError(409, 'PIN ini sudah dipakai pengguna lain. Pilih PIN yang berbeda.');
+    }
+  }
+}
+
+const USER_SELECT = `
+  SELECT u.id, u.name, u.username, u.role, u.is_active, (u.pin_hash IS NOT NULL) AS has_pin, u.created_at,
+         EXISTS(SELECT 1 FROM shifts s WHERE s.cashier_id = u.id AND s.status = 'open') AS has_open_shift
+  FROM users u`;
+
+// API shape of a user: never any hash
+const shapeUser = (r) => ({
+  id: r.id, name: r.name, username: r.username, role: r.role, is_active: r.is_active,
+  has_pin: !!r.has_pin, created_at: r.created_at, has_open_shift: !!r.has_open_shift
+});
+
+async function loadUser(conn, id) {
+  const [rows] = await conn.query(`${USER_SELECT} WHERE u.id = ?`, [id]);
+  return rows.length ? shapeUser(rows[0]) : null;
+}
+
+async function assertUsernameFree(conn, username, exceptId = null) {
+  const [rows] = await conn.query('SELECT id FROM users WHERE username = ? AND id <> ? LIMIT 1', [username, exceptId || 0]);
+  if (rows.length > 0) throw new HttpError(409, `Username ${username} sudah dipakai`);
+}
+
+function sendUserError(res, err) {
+  if (err && err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Username sudah dipakai' });
+  res.status(err.status || 500).json({ error: err.message });
+}
+
+// Runs `fn(conn)` in a transaction that first locks every active admin row, then re-checks that the ACTING admin still is
+// one. That serialises changes that could leave no admin at all (two admins demoting each other at the same moment).
+async function adminTransaction(actorId, fn) {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query("SELECT id FROM users WHERE role = 'admin' AND is_active = 1 FOR UPDATE");
+    const [actor] = await conn.query('SELECT role, is_active FROM users WHERE id = ? FOR UPDATE', [actorId]);
+    if (actor.length === 0 || actor[0].role !== 'admin' || !actor[0].is_active) {
+      throw new HttpError(403, 'Hanya admin yang dapat mengelola user');
+    }
+    const result = await fn(conn);
+    await conn.commit();
+    return result;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+async function otherActiveAdmins(conn, exceptId) {
+  const [[row]] = await conn.query("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1 AND id <> ?", [exceptId]);
+  return row.n;
+}
+
+// ---- own account (every role) ----
+
+// GET /api/me -> the current name and role (the client re-reads it to follow changes made by an admin)
+app.get('/api/me', (req, res) => {
+  res.json({ id: req.user.id, name: req.user.name, username: req.user.username, role: req.user.role });
+});
+
+async function verifyOwnPassword(userId, password) {
+  const [rows] = await db.query('SELECT password_hash FROM users WHERE id = ?', [userId]);
+  if (rows.length === 0 || typeof password !== 'string' || !(await bcrypt.compare(password, rows[0].password_hash))) {
+    // 400, not 401: a mistyped password must not look like an expired session (the client logs out on 401)
+    throw new HttpError(400, 'Password lama salah');
+  }
+}
+
+// POST /api/me/password { current_password, new_password } -> { ok, token }: every other session of this user ends,
+// the one making the request continues with the returned token
+app.post('/api/me/password', async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body || {};
+    const next = parsePassword(new_password, 'Password baru');
+    await verifyOwnPassword(req.user.id, current_password);
+    if (next === current_password) throw new HttpError(400, 'Password baru harus berbeda dari password lama');
+
+    await db.query('UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?',
+      [await bcrypt.hash(next, BCRYPT_ROUNDS), req.user.id]);
+    const [[user]] = await db.query('SELECT id, name, username, role, session_version FROM users WHERE id = ?', [req.user.id]);
+    res.json({ ok: true, token: signUserToken(user), user: { id: user.id, name: user.name, username: user.username, role: user.role } });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// POST /api/me/pin { current_password, pin } -> supervisor / admin only; sessions stay valid
+app.post('/api/me/pin', async (req, res) => {
+  try {
+    if (!PIN_ROLES.includes(req.user.role)) throw new HttpError(403, 'Kasir tidak memiliki PIN');
+    const { current_password, pin } = req.body || {};
+    const newPin = parsePin(pin);
+    await verifyOwnPassword(req.user.id, current_password);
+    await withPinLock(async () => {
+      await assertPinUnique(newPin, req.user.id);
+      await db.query('UPDATE users SET pin_hash = ? WHERE id = ?', [await bcrypt.hash(newPin, BCRYPT_ROUNDS), req.user.id]);
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ---- admin only ----
+
+// GET /api/admin/users
+app.get('/api/admin/users', requireOnlyAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(`${USER_SELECT} ORDER BY u.id ASC`);
+    res.json(rows.map(shapeUser));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/users { name, username, role, password, pin? } (pin required for supervisor / admin)
+app.post('/api/admin/users', requireOnlyAdmin, async (req, res) => {
+  try {
+    const input = parseUserInput(req.body, { creating: true });
+    const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
+    const create = async () => {
+      await assertUsernameFree(db, input.username);
+      if (input.pin) await assertPinUnique(input.pin);
+      const pinHash = input.pin ? await bcrypt.hash(input.pin, BCRYPT_ROUNDS) : null;
+      const [ins] = await db.query(
+        'INSERT INTO users (name, username, password_hash, pin_hash, role) VALUES (?, ?, ?, ?, ?)',
+        [input.name, input.username, passwordHash, pinHash, input.role]
+      );
+      return ins.insertId;
+    };
+    const id = input.pin ? await withPinLock(create) : await create();
+    res.status(201).json({ ok: true, user: await loadUser(db, id) });
+  } catch (err) {
+    sendUserError(res, err);
+  }
+});
+
+// PUT /api/admin/users/:id { name, username, role, pin? }
+//   kasir -> supervisor/admin needs a PIN; -> kasir removes the PIN; supervisor <-> admin keeps it.
+//   You can not change your own role; the last active admin can not be demoted.
+app.put('/api/admin/users/:id', requireOnlyAdmin, async (req, res) => {
+  try {
+    const input = parseUserInput(req.body, { creating: false });
+    const id = Number(req.params.id);
+    const update = () => adminTransaction(req.user.id, async (conn) => {
+      const [rows] = await conn.query('SELECT id, role, is_active, pin_hash FROM users WHERE id = ? FOR UPDATE', [id]);
+      if (rows.length === 0) throw new HttpError(404, 'User tidak ditemukan');
+      const cur = rows[0];
+
+      if (input.role !== cur.role) {
+        if (cur.id === req.user.id) throw new HttpError(409, 'Anda tidak bisa mengubah peran akun sendiri');
+        if (cur.role === 'admin' && cur.is_active && (await otherActiveAdmins(conn, cur.id)) === 0) {
+          throw new HttpError(409, 'Tidak bisa menurunkan admin aktif terakhir');
+        }
+      }
+
+      let pinHash = cur.pin_hash;
+      if (!PIN_ROLES.includes(input.role)) {
+        pinHash = null; // kasir has no PIN
+      } else if (!PIN_ROLES.includes(cur.role) && !input.pin) {
+        throw new HttpError(400, 'PIN 4 digit wajib saat menjadikan user supervisor atau admin');
+      }
+      if (input.pin) {
+        await assertPinUnique(input.pin, cur.id);
+        pinHash = await bcrypt.hash(input.pin, BCRYPT_ROUNDS);
+      }
+
+      await assertUsernameFree(conn, input.username, cur.id);
+      await conn.query('UPDATE users SET name = ?, username = ?, role = ?, pin_hash = ? WHERE id = ?',
+        [input.name, input.username, input.role, pinHash, cur.id]);
+      return loadUser(conn, cur.id);
+    });
+    const user = input.pin ? await withPinLock(update) : await update();
+    res.json({ ok: true, user });
+  } catch (err) {
+    sendUserError(res, err);
+  }
+});
+
+// POST /api/admin/users/:id/password { password } -> reset; ends every session of that user
+app.post('/api/admin/users/:id/password', requireOnlyAdmin, async (req, res) => {
+  try {
+    const password = parsePassword(req.body && req.body.password);
+    const id = Number(req.params.id);
+    if (id === req.user.id) throw new HttpError(409, 'Gunakan Akun Saya untuk mengganti password sendiri');
+    const [found] = await db.query('SELECT id FROM users WHERE id = ?', [id]);
+    if (found.length === 0) throw new HttpError(404, 'User tidak ditemukan');
+    await db.query('UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?',
+      [await bcrypt.hash(password, BCRYPT_ROUNDS), id]);
+    res.json({ ok: true, user: await loadUser(db, id) });
+  } catch (err) {
+    sendUserError(res, err);
+  }
+});
+
+// PUT /api/admin/users/:id/pin { pin } -> supervisor / admin only
+app.put('/api/admin/users/:id/pin', requireOnlyAdmin, async (req, res) => {
+  try {
+    const pin = parsePin(req.body && req.body.pin);
+    const id = Number(req.params.id);
+    const [found] = await db.query('SELECT id, role FROM users WHERE id = ?', [id]);
+    if (found.length === 0) throw new HttpError(404, 'User tidak ditemukan');
+    if (!PIN_ROLES.includes(found[0].role)) throw new HttpError(400, 'Kasir tidak memiliki PIN');
+    await withPinLock(async () => {
+      await assertPinUnique(pin, id);
+      await db.query('UPDATE users SET pin_hash = ? WHERE id = ?', [await bcrypt.hash(pin, BCRYPT_ROUNDS), id]);
+    });
+    res.json({ ok: true, user: await loadUser(db, id) });
+  } catch (err) {
+    sendUserError(res, err);
+  }
+});
+
+// PATCH /api/admin/users/:id/active { is_active } -> "delete" = deactivate; idempotent.
+//   Not yourself, not the last active admin, not a user with an open shift. Any change ends that user's sessions, and
+//   re-activating a supervisor / admin clears the old PIN (its uniqueness can not be re-checked), so an admin sets a new one.
+app.patch('/api/admin/users/:id/active', requireOnlyAdmin, async (req, res) => {
+  try {
+    const isActive = req.body && req.body.is_active;
+    if (typeof isActive !== 'boolean') throw new HttpError(400, 'is_active harus true atau false');
+    const id = Number(req.params.id);
+    const user = await adminTransaction(req.user.id, async (conn) => {
+      const [rows] = await conn.query('SELECT id, name, role, is_active FROM users WHERE id = ? FOR UPDATE', [id]);
+      if (rows.length === 0) throw new HttpError(404, 'User tidak ditemukan');
+      const cur = rows[0];
+
+      if (!isActive && cur.is_active) {
+        if (cur.id === req.user.id) throw new HttpError(409, 'Anda tidak bisa menonaktifkan akun sendiri');
+        if (cur.role === 'admin' && (await otherActiveAdmins(conn, cur.id)) === 0) {
+          throw new HttpError(409, 'Tidak bisa menonaktifkan admin aktif terakhir');
+        }
+        const [open] = await conn.query("SELECT id FROM shifts WHERE cashier_id = ? AND status = 'open' LIMIT 1", [cur.id]);
+        if (open.length > 0) throw new HttpError(409, `${cur.name} masih punya shift yang terbuka. Tutup shift itu dulu.`);
+      }
+
+      if (isActive !== !!cur.is_active) {
+        const clearPin = isActive && PIN_ROLES.includes(cur.role);
+        await conn.query(
+          `UPDATE users SET is_active = ?, session_version = session_version + 1${clearPin ? ', pin_hash = NULL' : ''} WHERE id = ?`,
+          [isActive ? 1 : 0, cur.id]
+        );
+      }
+      return loadUser(conn, cur.id);
+    });
+    res.json({ ok: true, user });
+  } catch (err) {
+    sendUserError(res, err);
+  }
+});
+
+// ---------- LAPORAN PENJUALAN ----------
+
+const REPORT_MAX_DAYS = 366;
+const ORDER_TYPE_LABEL = {
+  dine_in: 'Dine-in', take_away: 'Take Away', delivery: 'Delivery',
+  gofood: 'GoFood', grabfood: 'GrabFood', shopeefood: 'ShopeeFood'
+};
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// payments.amount is what the customer HANDED OVER (cash can be more than the bill). This splits it into the part that
+// is really sales: the change given back (paid - order total) is taken out of cash first (latest cash payment first),
+// then out of any other payment. payments: [{ id, method, amount }] -> Map(id -> net amount)
+function netPaymentAmounts(payments, orderTotal) {
+  const net = new Map(payments.map(p => [p.id, Number(p.amount)]));
+  let change = round2(payments.reduce((s, p) => s + Number(p.amount), 0) - Number(orderTotal));
+  if (change <= 0) return net;
+  const order = [...payments].sort((a, b) => ((a.method === 'Tunai' ? 0 : 1) - (b.method === 'Tunai' ? 0 : 1)) || (b.id - a.id));
+  for (const p of order) {
+    if (change <= 0) break;
+    const cut = Math.min(change, net.get(p.id));
+    net.set(p.id, round2(net.get(p.id) - cut));
+    change = round2(change - cut);
+  }
+  return net;
+}
+
+// Groups payment rows { id, order_id, amount, method, total } by order and returns their net amounts as an array of
+// { method, net } (all rows of an order must be present so the change can be split)
+function netPaymentRows(rows) {
+  const byOrder = new Map();
+  for (const r of rows) {
+    if (!byOrder.has(r.order_id)) byOrder.set(r.order_id, { total: r.total, payments: [] });
+    byOrder.get(r.order_id).payments.push(r);
+  }
+  const out = [];
+  for (const { total, payments } of byOrder.values()) {
+    const net = netPaymentAmounts(payments, total);
+    for (const p of payments) out.push({ method: p.method, method_id: p.method_id, net: net.get(p.id) });
+  }
+  return out;
+}
+
+// Cash that really stays in the drawer for one shift: Σ net cash payments (tendered minus change given)
+async function shiftNetCash(conn, shiftId) {
+  const [rows] = await conn.query(
+    `SELECT p.id, p.order_id, p.amount, pm.id AS method_id, pm.name AS method, o.total
+     FROM payments p
+     JOIN payment_methods pm ON pm.id = p.payment_method_id
+     JOIN orders o ON o.id = p.order_id
+     WHERE p.shift_id = ?
+     ORDER BY p.order_id, p.id`,
+    [shiftId]
+  );
+  return round2(netPaymentRows(rows).filter(r => r.method === 'Tunai').reduce((s, r) => s + r.net, 0));
+}
+
+const addDaysStr = (dateStr, n) => new Date(Date.parse(dateStr) + n * 86400000).toISOString().slice(0, 10);
+
+function parseReportDate(value, label) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(400, `${label} harus berformat YYYY-MM-DD`);
+  }
+  const [y, m, d] = value.split('-').map(Number);
+  const check = new Date(Date.UTC(y, m - 1, d));
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) {
+    throw new HttpError(400, `${label} bukan tanggal yang valid`);
+  }
+  return value;
+}
+
+// from / to both or neither (= today); real dates; from <= to; at most 366 days; a kasir may only see today.
+// Boundaries are plain text, so no DATE() is needed on the (WIB) DATETIME columns.
+function parseReportPeriod(query, user, today) {
+  let from;
+  let to;
+  if (query.from === undefined && query.to === undefined) {
+    from = to = today;
+  } else {
+    if (query.from === undefined || query.to === undefined) throw new HttpError(400, 'Isi tanggal dari dan sampai sekaligus');
+    from = parseReportDate(query.from, 'Tanggal dari');
+    to = parseReportDate(query.to, 'Tanggal sampai');
+  }
+  // role first: whatever period a kasir asks for, anything but today is refused (403, not a length/order error)
+  if (user.role === 'kasir' && !(from === today && to === today)) {
+    throw new HttpError(403, 'Laporan periode lain hanya untuk admin atau supervisor');
+  }
+  if (from > to) throw new HttpError(400, 'Tanggal dari tidak boleh setelah tanggal sampai');
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  if (days > REPORT_MAX_DAYS) throw new HttpError(400, `Periode paling lama ${REPORT_MAX_DAYS} hari`);
+  return { from, to, days, fromTs: `${from} 00:00:00`, toTs: `${addDaysStr(to, 1)} 00:00:00` };
+}
+
+// "Today" the way MySQL stores times (NOW()), so it always matches closed_at
+async function mysqlToday() {
+  const [[row]] = await db.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
+  return row.today;
+}
+
+// CSV for Excel (Indonesian locale uses ";"): quotes cells that need it and defuses spreadsheet formulas
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return String(value);
+  let s = String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (/[;"\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+const toCsv = (rows) => `﻿${rows.map(r => r.map(csvCell).join(';')).join('\r\n')}\r\n`;
+
+async function buildSalesReport(p, today) {
+  const range = [p.fromTs, p.toTs];
+  const SOLD = "o.status = 'selesai' AND o.closed_at >= ? AND o.closed_at < ?";
+
+  const [[sum]] = await db.query(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(o.total), 0) AS total, COALESCE(SUM(o.subtotal), 0) AS subtotal,
+            COALESCE(SUM(o.discount_amount), 0) AS discount, COALESCE(SUM(o.tax_amount), 0) AS tax,
+            COALESCE(SUM(o.service_amount), 0) AS service
+     FROM orders o WHERE ${SOLD}`, range);
+  const [[voids]] = await db.query(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(o.total), 0) AS total FROM orders o
+     WHERE o.status = 'void' AND COALESCE(o.closed_at, o.opened_at) >= ? AND COALESCE(o.closed_at, o.opened_at) < ?`, range);
+
+  const [dailyRows] = await db.query(
+    `SELECT DATE_FORMAT(o.closed_at, '%Y-%m-%d') AS d, COUNT(*) AS n, SUM(o.total) AS total
+     FROM orders o WHERE ${SOLD} GROUP BY d`, range);
+  const dailyMap = new Map(dailyRows.map(r => [r.d, r]));
+  const daily = [];
+  for (let i = 0; i < p.days; i++) {
+    const date = addDaysStr(p.from, i);
+    const r = dailyMap.get(date);
+    daily.push({ date, transactions: r ? Number(r.n) : 0, total: r ? round2(Number(r.total)) : 0 });
+  }
+
+  const [typeRows] = await db.query(
+    `SELECT o.order_type, o.platform, COUNT(*) AS n, SUM(o.total) AS total
+     FROM orders o WHERE ${SOLD} GROUP BY o.order_type, o.platform ORDER BY total DESC`, range);
+  const order_types = typeRows.map(r => {
+    const key = r.order_type === 'delivery' && r.platform ? r.platform : r.order_type;
+    return { key, label: ORDER_TYPE_LABEL[key] || key, transactions: Number(r.n), total: round2(Number(r.total)) };
+  });
+
+  // "Per kasir" = the cashier who took the payment (the shift the order was paid in), not who opened the order
+  const [cashierRows] = await db.query(
+    `SELECT u.id, u.name, COUNT(*) AS n, SUM(o.total) AS total
+     FROM orders o
+     LEFT JOIN shifts s ON s.id = o.shift_id
+     JOIN users u ON u.id = COALESCE(s.cashier_id, o.cashier_id)
+     WHERE ${SOLD} GROUP BY u.id, u.name ORDER BY total DESC`, range);
+  const cashiers = cashierRows.map(r => ({ id: r.id, name: r.name, transactions: Number(r.n), total: round2(Number(r.total)) }));
+
+  const [productRows] = await db.query(
+    `SELECT oi.product_id, pr.name, c.name AS category, SUM(oi.qty) AS qty, SUM(oi.qty * oi.price) AS revenue,
+            pr.stock, ${stockStatusSql('pr')} AS stock_status
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     JOIN products pr ON pr.id = oi.product_id
+     JOIN categories c ON c.id = pr.category_id
+     WHERE ${SOLD}
+     GROUP BY oi.product_id, pr.name, c.name, pr.stock, pr.low_stock_threshold, pr.is_available
+     ORDER BY qty DESC, revenue DESC, pr.name ASC`, range);
+  const products = productRows.map(r => ({
+    product_id: r.product_id, name: r.name, category: r.category, qty: Number(r.qty), revenue: round2(Number(r.revenue)),
+    stock: r.stock, stock_status: r.stock_status
+  }));
+
+  const [hourRows] = await db.query(
+    `SELECT HOUR(o.closed_at) AS h, COUNT(*) AS n, SUM(o.total) AS total
+     FROM orders o WHERE ${SOLD} GROUP BY h ORDER BY h`, range);
+  const hourly = hourRows.map(r => ({ hour: r.h, transactions: Number(r.n), total: round2(Number(r.total)) }));
+
+  // Net sales per payment method (change taken out); every active method is listed, even with 0
+  const [payRows] = await db.query(
+    `SELECT pay.id, pay.order_id, pay.amount, pm.id AS method_id, pm.name AS method, o.total
+     FROM payments pay
+     JOIN payment_methods pm ON pm.id = pay.payment_method_id
+     JOIN orders o ON o.id = pay.order_id
+     WHERE ${SOLD} ORDER BY pay.order_id, pay.id`, range);
+  const [methods] = await db.query('SELECT id, name FROM payment_methods WHERE is_active = 1 ORDER BY id');
+  const byMethod = new Map(methods.map(m => [m.id, { name: m.name, total: 0 }]));
+  for (const r of netPaymentRows(payRows)) {
+    if (!byMethod.has(r.method_id)) byMethod.set(r.method_id, { name: r.method, total: 0 }); // inactive method with sales
+    byMethod.get(r.method_id).total += r.net;
+  }
+  const payment_methods = [...byMethod.values()].map(m => ({ name: m.name, total: round2(m.total) }));
+
+  const transactions = Number(sum.n);
+  const salesTotal = round2(Number(sum.total));
+  return {
+    period: { from: p.from, to: p.to, days: p.days, today },
+    summary: {
+      sales_total: salesTotal,
+      transactions,
+      average: transactions ? Math.round(salesTotal / transactions) : 0,
+      subtotal: round2(Number(sum.subtotal)),
+      discount: round2(Number(sum.discount)),
+      tax: round2(Number(sum.tax)),
+      service: round2(Number(sum.service)),
+      void_count: Number(voids.n),
+      void_total: round2(Number(voids.total))
+    },
+    daily, payment_methods, order_types, cashiers, products, hourly
+  };
+}
+
+// GET /api/reports/sales?from=YYYY-MM-DD&to=YYYY-MM-DD (no params = today). A kasir may only ask for today.
+app.get('/api/reports/sales', async (req, res) => {
+  try {
+    const today = await mysqlToday();
+    const period = parseReportPeriod(req.query, req.user, today);
+    res.json(await buildSalesReport(period, today));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/reports/export?type=transactions|products&from&to -> CSV download (admin / supervisor)
+app.get('/api/reports/export', requireAdmin, async (req, res) => {
+  try {
+    const type = req.query.type;
+    if (type !== 'transactions' && type !== 'products') throw new HttpError(400, 'Jenis ekspor harus transactions atau products');
+    const today = await mysqlToday();
+    const p = parseReportPeriod(req.query, req.user, today);
+
+    let rows;
+    let filename;
+    if (type === 'products') {
+      const report = await buildSalesReport(p, today);
+      rows = [['Menu', 'Kategori', 'Jumlah Terjual', 'Omzet']];
+      report.products.forEach(x => rows.push([x.name, x.category, x.qty, Math.round(x.revenue)]));
+      filename = `penjualan-menu_${p.from}_${p.to}.csv`;
+    } else {
+      const [orders] = await db.query(
+        `SELECT o.order_no, o.status, o.order_type, o.platform, t.code AS table_code, o.customer_name, u.name AS cashier,
+                DATE_FORMAT(COALESCE(o.closed_at, o.opened_at), '%Y-%m-%d %H:%i:%s') AS at,
+                o.subtotal, o.discount_amount, o.tax_amount, o.service_amount, o.total, o.void_reason,
+                (SELECT GROUP_CONCAT(pm.name ORDER BY pay.id SEPARATOR ' + ')
+                 FROM payments pay JOIN payment_methods pm ON pm.id = pay.payment_method_id
+                 WHERE pay.order_id = o.id) AS methods
+         FROM orders o
+         LEFT JOIN restaurant_tables t ON t.id = o.table_id
+         LEFT JOIN shifts s ON s.id = o.shift_id
+         LEFT JOIN users u ON u.id = COALESCE(s.cashier_id, o.cashier_id)
+         WHERE (o.status = 'selesai' AND o.closed_at >= ? AND o.closed_at < ?)
+            OR (o.status = 'void' AND COALESCE(o.closed_at, o.opened_at) >= ? AND COALESCE(o.closed_at, o.opened_at) < ?)
+         ORDER BY COALESCE(o.closed_at, o.opened_at) ASC, o.id ASC`,
+        [p.fromTs, p.toTs, p.fromTs, p.toTs]
+      );
+      rows = [['No. Transaksi', 'Waktu', 'Status', 'Tipe', 'Meja/Platform', 'Pelanggan', 'Kasir', 'Metode Bayar',
+        'Subtotal', 'Diskon', 'Pajak', 'Service', 'Total', 'Alasan Void']];
+      orders.forEach(o => rows.push([
+        o.order_no, o.at, o.status === 'void' ? 'Void' : 'Selesai', ORDER_TYPE_LABEL[o.order_type] || o.order_type,
+        o.order_type === 'dine_in' ? (o.table_code || '') : (o.platform ? ORDER_TYPE_LABEL[o.platform] : ''),
+        o.customer_name || '', o.cashier || '', o.methods || '',
+        Math.round(o.subtotal), Math.round(o.discount_amount), Math.round(o.tax_amount), Math.round(o.service_amount),
+        Math.round(o.total), o.void_reason || ''
+      ]));
+      filename = `transaksi_${p.from}_${p.to}.csv`;
+    }
+
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${filename}"` });
+    res.send(toCsv(rows));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -2085,83 +2694,6 @@ app.get('/api/dashboard/summary', async (req, res) => {
       total_service: Math.round(Number(today.total_service)),
       total_discount: Math.round(Number(today.total_discount))
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/dashboard/payment-methods
-app.get('/api/dashboard/payment-methods', async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT pm.name, COALESCE(SUM(p.amount), 0) AS total
-      FROM payment_methods pm
-      LEFT JOIN payments p ON pm.id = p.payment_method_id AND DATE(p.paid_at) = CURDATE()
-      WHERE pm.is_active = 1
-      GROUP BY pm.id, pm.name
-      ORDER BY pm.id ASC
-    `);
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/dashboard/best-sellers
-app.get('/api/dashboard/best-sellers', async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT oi.product_id, oi.product_name AS name, c.name AS category,
-             SUM(oi.qty) AS qty, SUM(oi.qty * oi.price) AS revenue,
-             pr.stock, pr.low_stock_threshold, pr.is_available
-      FROM order_items oi
-      JOIN orders o ON o.id = oi.order_id
-      JOIN products pr ON pr.id = oi.product_id
-      JOIN categories c ON c.id = pr.category_id
-      WHERE o.status = 'selesai' AND DATE(o.closed_at) = CURDATE()
-      GROUP BY oi.product_id, oi.product_name, c.name, pr.stock, pr.low_stock_threshold, pr.is_available
-      ORDER BY qty DESC
-      LIMIT 5
-    `);
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/dashboard/hourly
-app.get('/api/dashboard/hourly', async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT HOUR(closed_at) AS jam, SUM(total) AS total
-      FROM orders
-      WHERE status = 'selesai' AND DATE(closed_at) = CURDATE()
-      GROUP BY HOUR(closed_at)
-      ORDER BY jam ASC
-    `);
-
-    const salesMap = {};
-    rows.forEach(r => {
-      salesMap[r.jam] = Number(r.total);
-    });
-
-    // Business hours 10:00 to 20:00 (matching dashboard)
-    const hours = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-    let maxVal = 0;
-    const result = hours.map(h => {
-      const val = salesMap[h] || 0;
-      if (val > maxVal) maxVal = val;
-      return {
-        h: `${String(h).padStart(2, '0')}:00`,
-        val
-      };
-    });
-
-    result.forEach(item => {
-      item.peak = maxVal > 0 && item.val === maxVal;
-    });
-
-    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

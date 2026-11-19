@@ -235,6 +235,19 @@
     .pay-bar-track { height: 7px; background: var(--bg-subtle); border-radius: 4px; overflow: hidden; display: flex; }
     .pay-bar-fill { height: 100%; border-radius: 4px; }
     
+    /* Kelola user */
+    .usr-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .role-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .role-badge.admin { background: var(--primary-subtle); color: var(--primary); }
+    .role-badge.supervisor { background: var(--info-subtle); color: var(--info); }
+    .role-badge.kasir { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border); }
+    /* Laporan penjualan */
+    .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .report-grid .stat-value { font-size: 18px; overflow-wrap: anywhere; }
+    .report-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .report-grid2 { grid-template-columns: 1fr; } }
+    .report-empty { text-align: center; color: var(--text-muted); font-size: 12px; padding: 16px 0; }
+    .report-note { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
     .hourly-chart { display: flex; align-items: flex-end; gap: 6px; height: 130px; padding-top: 20px; }
     .chart-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
     .chart-bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--primary-subtle); transition: height 0.3s; min-height: 4px; }
@@ -309,6 +322,7 @@
           <div id="header-user-role" style="font-size: 10px; color: var(--text-muted);">Keluar ↗</div>
         </div>
       </div>
+      <button class="btn btn-subtle btn-sm" id="btn-my-account" title="Akun Saya: ganti password atau PIN" aria-label="Akun Saya" onclick="openMyAccount()">🔑</button>
       <button class="btn btn-subtle btn-sm" id="btn-theme-toggle" title="Ganti Tema">🌙</button>
       <div style="position:relative;">
         <button class="btn btn-subtle btn-sm" id="btn-notif-toggle">🔔 <span id="notif-badge" style="background:var(--danger);color:#fff;font-size:9px;padding:1px 5px;border-radius:10px;">0</span></button>
@@ -357,6 +371,7 @@
         <button class="tab-btn" onclick="switchTab('transaksi')">🧾 Riwayat Transaksi</button>
         <button class="tab-btn" onclick="switchTab('stok')">📦 Kelola Stok</button>
         <button class="tab-btn" id="tab-btn-kelolamenu" style="display:none;" onclick="switchTab('kelolamenu')">🛠️ Kelola Menu</button>
+        <button class="tab-btn" id="tab-btn-users" style="display:none;" onclick="switchTab('users')">👥 Kelola User</button>
       </div>
 
       <!-- TAB 1: MEJA & PESANAN AKTIF -->
@@ -421,18 +436,70 @@
 
       <!-- TAB 3: PENJUALAN & LAPORAN -->
       <div id="tab-pane-laporan" style="display:none;flex-direction:column;gap:16px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="card">
+          <div class="card-title-bar">
+            <div>
+              <div class="card-title">📊 Laporan Penjualan</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="report-period-label">Memuat...</div>
+            </div>
+            <div id="report-export" style="display:none;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+              <button class="btn btn-subtle btn-touch" onclick="downloadReportCsv('transactions')">⬇ CSV Transaksi</button>
+              <button class="btn btn-subtle btn-touch" onclick="downloadReportCsv('products')">⬇ CSV Menu</button>
+            </div>
+          </div>
+          <div id="report-controls" style="display:none;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="pill-btn" id="rp-hari_ini" onclick="setReportPreset('hari_ini')">Hari ini</button>
+              <button class="pill-btn" id="rp-kemarin" onclick="setReportPreset('kemarin')">Kemarin</button>
+              <button class="pill-btn" id="rp-7_hari" onclick="setReportPreset('7_hari')">7 hari terakhir</button>
+              <button class="pill-btn" id="rp-bulan_ini" onclick="setReportPreset('bulan_ini')">Bulan ini</button>
+              <button class="pill-btn" id="rp-bulan_lalu" onclick="setReportPreset('bulan_lalu')">Bulan lalu</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+              <label style="font-size:12px;font-weight:600;">Dari <input type="date" class="modal-input" id="rp-from" style="width:auto;display:inline-block;"></label>
+              <label style="font-size:12px;font-weight:600;">Sampai <input type="date" class="modal-input" id="rp-to" style="width:auto;display:inline-block;"></label>
+              <button class="btn btn-primary btn-touch" onclick="applyReportDates()">Terapkan</button>
+            </div>
+            <div class="field-error" id="rp-error" role="alert"></div>
+          </div>
+        </div>
+
+        <div class="report-grid" id="report-summary"></div>
+
+        <div class="card" id="report-daily-card" style="display:none;">
+          <div class="card-title" id="report-daily-title">📅 Penjualan per Hari</div>
+          <div id="report-daily" style="margin-top:10px;"></div>
+        </div>
+
+        <div class="report-grid2">
           <div class="card">
             <div class="card-title">💳 Penjualan Berdasarkan Metode</div>
-            <div class="pay-bars" id="payment-methods-bars" style="margin-top:14px;"></div>
+            <div class="pay-bars" id="report-methods" style="margin-top:14px;"></div>
+            <div class="report-note">Nilai bersih: kembalian tidak dihitung.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">🍽️ Berdasarkan Tipe Pesanan</div>
+            <div class="pay-bars" id="report-types" style="margin-top:14px;"></div>
+          </div>
+        </div>
+
+        <div class="report-grid2">
+          <div class="card">
+            <div class="card-title">👤 Berdasarkan Kasir</div>
+            <div class="pay-bars" id="report-cashiers" style="margin-top:14px;"></div>
+            <div class="report-note">Kasir yang menerima pembayaran.</div>
           </div>
           <div class="card">
             <div class="card-title">⏰ Grafik Penjualan Per Jam</div>
-            <div class="hourly-chart" id="hourly-chart-bars"></div>
+            <div class="hourly-chart" id="report-hourly"></div>
           </div>
         </div>
+
         <div class="card">
-          <div class="card-title">🏆 Top 5 Menu Terlaris Hari Ini</div>
+          <div class="card-title-bar">
+            <div class="card-title" id="report-products-title">🏆 Menu Terlaris</div>
+            <button class="btn btn-subtle btn-touch" id="report-products-toggle" style="display:none;" onclick="toggleReportProducts()"></button>
+          </div>
           <table class="table-responsive" style="margin-top:10px;">
             <thead>
               <tr>
@@ -440,12 +507,13 @@
                 <th>Nama Menu</th>
                 <th>Kategori</th>
                 <th>Terjual</th>
-                <th>Total Pendapatan</th>
+                <th>Omzet Menu</th>
                 <th>Stok</th>
               </tr>
             </thead>
-            <tbody id="top-sellers-table"></tbody>
+            <tbody id="report-products"></tbody>
           </table>
+          <div class="report-note">Omzet menu dihitung dari harga item sebelum diskon, pajak, dan service, jadi tidak sama dengan total penjualan.</div>
         </div>
       </div>
 
@@ -535,6 +603,36 @@
           </table>
           <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
             Stok diatur di tab Kelola Stok. "Nonaktifkan" menyembunyikan menu dari kasir; riwayat transaksi dan pesanan yang sedang berjalan tidak berubah.
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 7: KELOLA USER (admin) -->
+      <div id="tab-pane-users" style="display:none;flex-direction:column;gap:16px;">
+        <div class="card">
+          <div class="card-title-bar">
+            <div>
+              <div class="card-title">👥 Kelola User</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="usr-summary">Memuat...</div>
+            </div>
+            <button class="btn btn-primary btn-touch" onclick="openUserForm()">+ Tambah User</button>
+          </div>
+          <table class="table-responsive" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>Nama</th>
+                <th>Username</th>
+                <th>Peran</th>
+                <th>PIN</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="usr-table-body"></tbody>
+          </table>
+          <div class="report-note">
+            Password dan PIN tidak pernah ditampilkan. Reset password, nonaktifkan, dan ubah peran berlaku seketika: sesi yang sedang berjalan ikut berakhir.
+            User tidak dihapus supaya riwayat transaksinya tetap utuh. PIN dipakai supervisor dan admin untuk otorisasi diskon besar dan void, jadi tidak boleh sama dengan PIN pengguna lain.
           </div>
         </div>
       </div>
@@ -731,6 +829,110 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
         <button class="btn btn-subtle" onclick="closeModal('modal-correction')">Batal</button>
         <button class="btn btn-primary" id="btn-correct-save" onclick="submitCorrection()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: AKUN SAYA (semua peran) -->
+  <div class="modal-overlay" id="modal-my-account">
+    <div class="modal-card" style="max-width:420px;">
+      <div class="card-title" style="margin-bottom:2px;">🔑 Akun Saya</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;overflow-wrap:anywhere;" id="ma-who"></div>
+
+      <div style="font-weight:700;font-size:13px;margin-top:4px;">Ganti Password</div>
+      <label class="modal-field-label" for="ma-pw-current">Password saat ini</label>
+      <input type="password" class="modal-input" id="ma-pw-current" autocomplete="current-password" maxlength="72">
+      <label class="modal-field-label" for="ma-pw-new">Password baru (minimal 8 karakter)</label>
+      <input type="password" class="modal-input" id="ma-pw-new" autocomplete="new-password" maxlength="72">
+      <label class="modal-field-label" for="ma-pw-new2">Ulangi password baru</label>
+      <input type="password" class="modal-input" id="ma-pw-new2" autocomplete="new-password" maxlength="72"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitMyPassword();}">
+      <div class="field-error" id="ma-pw-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button class="btn btn-primary btn-touch" id="ma-pw-save" onclick="submitMyPassword()">Ganti Password</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Setelah diganti, login di perangkat lain berakhir; sesi ini tetap berjalan.</div>
+
+      <div id="ma-pin-section" style="display:none;border-top:1px solid var(--border);margin-top:14px;padding-top:10px;">
+        <div style="font-weight:700;font-size:13px;">Ganti PIN</div>
+        <div style="font-size:11px;color:var(--text-muted);">PIN dipakai untuk otorisasi diskon besar dan void.</div>
+        <label class="modal-field-label" for="ma-pin-pw">Password saat ini</label>
+        <input type="password" class="modal-input" id="ma-pin-pw" autocomplete="current-password" maxlength="72">
+        <label class="modal-field-label" for="ma-pin-new">PIN baru (4 digit)</label>
+        <input type="password" class="modal-input" id="ma-pin-new" inputmode="numeric" maxlength="4" autocomplete="off"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();submitMyPin();}">
+        <div class="field-error" id="ma-pin-error" role="alert"></div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary btn-touch" id="ma-pin-save" onclick="submitMyPin()">Ganti PIN</button>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-my-account')">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TAMBAH / UBAH USER (admin) -->
+  <div class="modal-overlay" id="modal-user-form">
+    <div class="modal-card" style="max-width:420px;">
+      <div class="card-title" id="uf-title" style="margin-bottom:4px;">➕ Tambah User</div>
+
+      <label class="modal-field-label" for="uf-name">Nama</label>
+      <input type="text" class="modal-input" id="uf-name" maxlength="100" placeholder="cth: Kasir Dewi" autocomplete="off"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitUserForm();}">
+
+      <label class="modal-field-label" for="uf-username">Username</label>
+      <input type="text" class="modal-input" id="uf-username" maxlength="30" placeholder="cth: dewi" autocomplete="off" autocapitalize="none"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitUserForm();}">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">3-30 karakter: huruf, angka, titik, garis bawah, atau strip. Huruf besar otomatis jadi kecil.</div>
+
+      <label class="modal-field-label" for="uf-role">Peran</label>
+      <select class="modal-input" id="uf-role" onchange="updateUserFormFields()">
+        <option value="kasir">Kasir</option>
+        <option value="supervisor">Supervisor</option>
+        <option value="admin">Admin</option>
+      </select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px;" id="uf-role-note"></div>
+
+      <div id="uf-password-wrap">
+        <label class="modal-field-label" for="uf-password">Password awal (minimal 8 karakter)</label>
+        <input type="password" class="modal-input" id="uf-password" autocomplete="new-password" maxlength="72"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();submitUserForm();}">
+      </div>
+
+      <div id="uf-pin-wrap">
+        <label class="modal-field-label" for="uf-pin">PIN (4 digit, untuk otorisasi diskon besar dan void)</label>
+        <input type="password" class="modal-input" id="uf-pin" inputmode="numeric" maxlength="4" autocomplete="off"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();submitUserForm();}">
+      </div>
+
+      <div class="field-error" id="uf-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-user-form')">Batal</button>
+        <button class="btn btn-primary btn-touch" id="uf-save" onclick="submitUserForm()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: RESET PASSWORD / ATUR PIN USER (admin) -->
+  <div class="modal-overlay" id="modal-user-secret">
+    <div class="modal-card" style="max-width:380px;">
+      <div class="card-title" id="us-title" style="margin-bottom:2px;">Reset Password</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;overflow-wrap:anywhere;" id="us-who"></div>
+      <label class="modal-field-label" for="us-new" id="us-new-label">Password baru</label>
+      <input type="password" class="modal-input" id="us-new" maxlength="72" autocomplete="new-password"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitUserSecret();}">
+      <div id="us-repeat-wrap">
+        <label class="modal-field-label" for="us-new2">Ulangi password baru</label>
+        <input type="password" class="modal-input" id="us-new2" maxlength="72" autocomplete="new-password"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();submitUserSecret();}">
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px;" id="us-note"></div>
+      <div class="field-error" id="us-error" role="alert"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-user-secret')">Batal</button>
+        <button class="btn btn-primary btn-touch" id="us-save" onclick="submitUserSecret()">Simpan</button>
       </div>
     </div>
   </div>
@@ -1363,18 +1565,6 @@
       } catch (e) {}
     }
 
-    async function fetchReports() {
-      try {
-        const [payStats, bestSellers, hourly] = await Promise.all([
-          api('/api/dashboard/payment-methods'),
-          api('/api/dashboard/best-sellers'),
-          api('/api/dashboard/hourly')
-        ]);
-        renderPaymentStats(payStats);
-        renderBestSellers(bestSellers);
-        renderHourlyChart(hourly);
-      } catch (e) {}
-    }
 
     // ---------- RENDER VIEWS ----------
 
@@ -2455,79 +2645,240 @@
       });
     }
 
-    // 6. Reports View
-    function renderPaymentStats(stats) {
-      const container = document.getElementById("payment-methods-bars");
-      container.innerHTML = "";
+    // 6. Reports View ("Penjualan & Laporan"): one request to /api/reports/sales fills every section
+    // kasir: always today. admin / supervisor: pick a period (presets or dates) and export CSV.
+    let reportRange = null;     // { from, to, preset } chosen by admin / supervisor; null = today
+    let reportToday = "";       // "today" the way the server stores times, from the last response
+    let reportData = null;
+    let reportReq = 0;          // ignores answers of older requests
+    let reportShowAll = false;  // menu table: top 10 or everything
 
-      let allSum = 0;
-      stats.forEach(s => allSum += Number(s.total));
+    const REPORT_PRESETS = ["hari_ini", "kemarin", "7_hari", "bulan_ini", "bulan_lalu"];
+    const REPORT_COLORS = { Tunai: "var(--success)", QRIS: "var(--info)", Kartu: "var(--primary)", "E-wallet": "var(--warning)" };
 
-      const colors = {
-        Tunai: "var(--success)",
-        QRIS: "var(--info)",
-        Kartu: "var(--primary)",
-        "E-wallet": "var(--warning)"
-      };
-
-      stats.forEach(item => {
-        const amount = Number(item.total);
-        const pct = allSum > 0 ? Math.round((amount / allSum) * 100) : 0;
-        const row = document.createElement("div");
-        row.className = "pay-bar-row";
-        row.innerHTML = `
-          <div class="pay-bar-label">
-            <span>${item.name}</span>
-            <span>${formatRp(amount)} (${pct}%)</span>
-          </div>
-          <div class="pay-bar-track">
-            <div class="pay-bar-fill" style="width:${pct}%;background:${colors[item.name] || 'var(--primary)'};"></div>
-          </div>
-        `;
-        container.appendChild(row);
-      });
+    function addDaysStr(dateStr, n) {
+      return new Date(Date.parse(dateStr) + n * 86400000).toISOString().slice(0, 10);
     }
 
-    function renderBestSellers(list) {
-      const tbody = document.getElementById("top-sellers-table");
-      tbody.innerHTML = "";
+    function reportPresetRange(key, today) {
+      const [y, m] = today.split("-").map(Number);
+      const first = `${y}-${String(m).padStart(2, "0")}-01`;
+      if (key === "kemarin") { const d = addDaysStr(today, -1); return { from: d, to: d }; }
+      if (key === "7_hari") return { from: addDaysStr(today, -6), to: today };
+      if (key === "bulan_ini") return { from: first, to: today };
+      if (key === "bulan_lalu") { const last = addDaysStr(first, -1); return { from: `${last.slice(0, 8)}01`, to: last }; }
+      return { from: today, to: today };
+    }
 
-      if (!list || list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Belum ada data penjualan tercatat hari ini.</td></tr>`;
+    function fmtReportDate(dateStr) {
+      const [y, m, d] = dateStr.split("-");
+      return `${Number(d)} ${MONTH_SHORT[Number(m) - 1]} ${y}`;
+    }
+
+    async function fetchReports() {
+      const myReq = ++reportReq;
+      const errEl = document.getElementById("rp-error");
+      errEl.textContent = "";
+      try {
+        let url = "/api/reports/sales";
+        if (canManageMenu() && reportRange && reportRange.preset !== "hari_ini") url += `?from=${reportRange.from}&to=${reportRange.to}`;
+        const data = await api(url);
+        if (myReq !== reportReq) return;
+        reportData = data;
+        reportToday = data.period.today;
+        if (!canManageMenu()) reportRange = null;
+        else if (!reportRange || reportRange.preset === "hari_ini") reportRange = { from: data.period.from, to: data.period.to, preset: "hari_ini" };
+        renderReport(data);
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    }
+
+    function setReportPreset(key) {
+      if (!reportToday) return;
+      reportRange = { ...reportPresetRange(key, reportToday), preset: key };
+      fetchReports();
+    }
+
+    function applyReportDates() {
+      const from = document.getElementById("rp-from").value;
+      const to = document.getElementById("rp-to").value;
+      const errEl = document.getElementById("rp-error");
+      if (!from || !to) { errEl.textContent = "Isi tanggal dari dan sampai"; return; }
+      if (from > to) { errEl.textContent = "Tanggal dari tidak boleh setelah tanggal sampai"; return; }
+      reportRange = { from, to, preset: "kustom" };
+      fetchReports();
+    }
+
+    function toggleReportProducts() {
+      reportShowAll = !reportShowAll;
+      if (reportData) renderReportProducts(reportData.products);
+    }
+
+    function renderReport(data) {
+      const manager = canManageMenu();
+      document.getElementById("report-controls").style.display = manager ? "block" : "none";
+      document.getElementById("report-export").style.display = manager ? "flex" : "none";
+      if (manager && reportRange) {
+        REPORT_PRESETS.forEach(k => document.getElementById(`rp-${k}`).classList.toggle("active", reportRange.preset === k));
+        document.getElementById("rp-from").value = data.period.from;
+        document.getElementById("rp-to").value = data.period.to;
+      }
+
+      const p = data.period;
+      document.getElementById("report-period-label").textContent = p.days === 1
+        ? `${p.from === p.today ? "Hari ini • " : ""}${fmtReportDate(p.from)}`
+        : `${fmtReportDate(p.from)} – ${fmtReportDate(p.to)} (${p.days} hari)`;
+
+      const s = data.summary;
+      const card = (label, value, meta) => `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${value}</div>${meta ? `<div class="stat-meta">${meta}</div>` : ""}</div>`;
+      document.getElementById("report-summary").innerHTML =
+        card("Total Penjualan", formatRp(s.sales_total), "termasuk pajak & service") +
+        card("Jumlah Transaksi", `${s.transactions} Nota`) +
+        card("Rata-rata per Transaksi", formatRp(s.average)) +
+        card("Subtotal", formatRp(s.subtotal), "sebelum diskon") +
+        card("Diskon", formatRp(s.discount)) +
+        card("Pajak", formatRp(s.tax)) +
+        card("Service", formatRp(s.service)) +
+        card("Void", `${s.void_count} Nota`, s.void_count ? `senilai ${formatRp(s.void_total)}` : "tidak masuk penjualan");
+
+      renderReportDaily(data);
+      renderReportBars("report-methods", data.payment_methods.map(m => ({ label: m.name, total: m.total, color: REPORT_COLORS[m.name] })));
+      renderReportBars("report-types", data.order_types.map(t => ({ label: `${t.label} • ${t.transactions}x`, total: t.total })));
+      renderReportBars("report-cashiers", data.cashiers.map(c => ({ label: `${c.name} • ${c.transactions}x`, total: c.total })));
+      renderReportHourly(data.hourly);
+      reportShowAll = false;
+      renderReportProducts(data.products);
+    }
+
+    // label + amount + share bar (same look as the old "metode" bars)
+    function renderReportBars(containerId, rows) {
+      const container = document.getElementById(containerId);
+      const total = rows.reduce((sum, r) => sum + r.total, 0);
+      if (rows.length === 0) {
+        container.innerHTML = `<div class="report-empty">Belum ada penjualan pada periode ini.</div>`;
+        return;
+      }
+      container.innerHTML = rows.map(r => {
+        const pct = total > 0 ? Math.round((r.total / total) * 100) : 0;
+        return `<div class="pay-bar-row">
+          <div class="pay-bar-label"><span>${esc(r.label)}</span><span>${formatRp(r.total)} (${pct}%)</span></div>
+          <div class="pay-bar-track"><div class="pay-bar-fill" style="width:${pct}%;background:${r.color || "var(--primary)"};"></div></div>
+        </div>`;
+      }).join("");
+    }
+
+    // Per day (bars up to 31 days) or per month (table for longer periods); hidden for a single day
+    function renderReportDaily(data) {
+      const cardEl = document.getElementById("report-daily-card");
+      const days = data.period.days;
+      cardEl.style.display = days > 1 ? "block" : "none";
+      if (days <= 1) return;
+      const box = document.getElementById("report-daily");
+
+      if (days <= 31) {
+        document.getElementById("report-daily-title").textContent = "📅 Penjualan per Hari";
+        const max = Math.max(...data.daily.map(d => d.total), 1);
+        const peak = Math.max(...data.daily.map(d => d.total));
+        box.innerHTML = `<div class="hourly-chart">${data.daily.map(d => {
+          const pct = Math.round((d.total / max) * 100);
+          return `<div class="chart-col" title="${esc(fmtReportDate(d.date))}: ${formatRp(d.total)} (${d.transactions} transaksi)">
+            <div class="chart-bar ${peak > 0 && d.total === peak ? "peak" : ""}" style="height:${Math.max(4, pct)}%;"></div>
+            <span class="chart-col-label">${Number(d.date.slice(8))}</span>
+          </div>`;
+        }).join("")}</div>
+        <div class="report-note">Angka di bawah batang adalah tanggal. Arahkan kursor ke batang untuk melihat nilainya.</div>`;
         return;
       }
 
-      list.forEach((item, idx) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
+      document.getElementById("report-daily-title").textContent = "📅 Penjualan per Bulan";
+      const months = new Map();
+      data.daily.forEach(d => {
+        const key = d.date.slice(0, 7);
+        const m = months.get(key) || { transactions: 0, total: 0 };
+        m.transactions += d.transactions;
+        m.total += d.total;
+        months.set(key, m);
+      });
+      box.innerHTML = `<table class="table-responsive"><thead><tr><th>Bulan</th><th>Transaksi</th><th>Total Penjualan</th></tr></thead><tbody>${
+        [...months.entries()].map(([key, m]) => `<tr><td><strong>${MONTH_SHORT[Number(key.slice(5)) - 1]} ${key.slice(0, 4)}</strong></td><td>${m.transactions}</td><td>${formatRp(m.total)}</td></tr>`).join("")
+      }</tbody></table>`;
+    }
+
+    // Hours with sales, always showing at least 10:00-20:00
+    function renderReportHourly(hours) {
+      const container = document.getElementById("report-hourly");
+      const byHour = new Map(hours.map(h => [h.hour, h]));
+      const lo = Math.min(10, ...hours.map(h => h.hour));
+      const hi = Math.max(20, ...hours.map(h => h.hour));
+      const cols = [];
+      for (let h = lo; h <= hi; h++) {
+        const row = byHour.get(h);
+        cols.push({ hour: h, total: row ? row.total : 0, transactions: row ? row.transactions : 0 });
+      }
+      const max = Math.max(...cols.map(c => c.total), 1);
+      const peak = Math.max(...cols.map(c => c.total));
+      container.innerHTML = cols.map(c => {
+        const pct = Math.round((c.total / max) * 100);
+        const hh = String(c.hour).padStart(2, "0");
+        return `<div class="chart-col" title="${hh}:00: ${formatRp(c.total)} (${c.transactions} transaksi)">
+          <div class="chart-bar ${peak > 0 && c.total === peak ? "peak" : ""}" style="height:${Math.max(4, pct)}%;"></div>
+          <span class="chart-col-label">${hh}</span>
+        </div>`;
+      }).join("");
+    }
+
+    function renderReportProducts(list) {
+      const tbody = document.getElementById("report-products");
+      const toggle = document.getElementById("report-products-toggle");
+      const limit = 10;
+      document.getElementById("report-products-title").textContent = reportShowAll || list.length <= limit
+        ? `🏆 Menu Terlaris (${list.length} menu)` : `🏆 Top ${limit} Menu Terlaris`;
+      toggle.style.display = list.length > limit ? "inline-flex" : "none";
+      toggle.textContent = reportShowAll ? "Tampilkan 10 teratas" : `Tampilkan semua (${list.length})`;
+
+      if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Belum ada penjualan pada periode ini.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = (reportShowAll ? list : list.slice(0, limit)).map((item, idx) => `
+        <tr>
           <td><strong>#${idx + 1}</strong></td>
           <td><strong>${esc(item.name)}</strong></td>
-          <td><span style="font-size:11px;color:var(--text-muted);">${esc(item.category || '')}</span></td>
+          <td><span style="font-size:11px;color:var(--text-muted);">${esc(item.category || "")}</span></td>
           <td>${item.qty} Porsi</td>
           <td><strong>${formatRp(item.revenue)}</strong></td>
           <td>${stockStatusBadge(item)} <span style="font-size:11px;color:var(--text-muted);">${Number(item.stock) || 0}</span></td>
-        `;
-        tbody.appendChild(tr);
-      });
+        </tr>`).join("");
     }
 
-    function renderHourlyChart(hours) {
-      const container = document.getElementById("hourly-chart-bars");
-      container.innerHTML = "";
-
-      const maxVal = Math.max(...hours.map(h => h.val), 1);
-
-      hours.forEach(item => {
-        const pct = Math.round((item.val / maxVal) * 100);
-        const col = document.createElement("div");
-        col.className = "chart-col";
-        col.title = `${item.h}: ${formatRp(item.val)}`;
-        col.innerHTML = `
-          <div class="chart-bar ${item.peak ? 'peak' : ''}" style="height:${Math.max(4, pct)}%;"></div>
-          <span class="chart-col-label">${item.h.split(":")[0]}</span>
-        `;
-        container.appendChild(col);
-      });
+    // Download a CSV (needs the login header, so it goes through fetch and a temporary link)
+    async function downloadReportCsv(type) {
+      if (!canManageMenu() || !reportRange) return;
+      try {
+        const res = await fetch(`/api/reports/export?type=${type}&from=${reportRange.from}&to=${reportRange.to}`, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        if (!res.ok) {
+          let msg = "Gagal mengunduh laporan";
+          try { msg = (await res.json()).error || msg; } catch (e) {}
+          throw new Error(msg);
+        }
+        const blob = await res.blob();
+        const m = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+        const name = m ? m[1] : `laporan-${type}_${reportRange.from}_${reportRange.to}.csv`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Mengunduh ${name}`);
+      } catch (e) {
+        showToast(e.message);
+      }
     }
 
     // 7. Supervisor Auth Modal
@@ -3418,7 +3769,12 @@
       if (btn) btn.style.display = canManageMenu() ? "" : "none";
       const tablesBtn = document.getElementById("btn-manage-tables"); // "Atur Meja" on the floor-plan card
       if (tablesBtn) tablesBtn.style.display = canManageMenu() ? "" : "none";
+      const usersBtn = document.getElementById("tab-btn-users"); // "Kelola User": admin only
+      if (usersBtn) usersBtn.style.display = isAdminRole() ? "" : "none";
+      reportRange = null; // a new login always starts the report at today
+      reportData = null;
       if (!canManageMenu() && currentTab === "kelolamenu") switchTab("meja");
+      if (!isAdminRole() && currentTab === "users") switchTab("meja");
     }
 
     // Generic yes/no dialog: resolves true on the OK button, false on Batal
@@ -3937,6 +4293,341 @@
       );
     }
 
+    // ---------- AKUN SAYA & KELOLA USER ----------
+    // The server enforces every rule (admin only, last admin, own account, open shifts, unique PINs); this only shows them.
+    const ROLE_LABEL = { kasir: "Kasir", supervisor: "Supervisor", admin: "Admin" };
+    const PIN_ROLES_UI = ["supervisor", "admin"];
+    let adminUsers = [];
+    let userFormId = null;        // null = adding a user
+    let userFormOrigRole = null;
+    let userFormBusy = false;
+    let userSecretId = null;
+    let userSecretMode = "password"; // "password" | "pin"
+    let userSecretBusy = false;
+    let usersBusy = false;
+    let myAccountBusy = false;
+
+    function isAdminRole() {
+      return !!currentUser && currentUser.role === "admin";
+    }
+
+    // Follows changes an admin made to MY account (name, role) without a new login. A deactivated account or a reset
+    // password answers 401 here, and api() then logs this browser out.
+    async function syncMe() {
+      if (!authToken) return;
+      try {
+        const me = await api('/api/me');
+        if (!currentUser || me.role !== currentUser.role || me.name !== currentUser.name || me.username !== currentUser.username) {
+          const roleChanged = !currentUser || me.role !== currentUser.role;
+          currentUser = { ...currentUser, ...me };
+          localStorage.setItem("pos_user", JSON.stringify(currentUser));
+          updateUserProfileHeader(); // also re-applies the tabs / buttons for the (new) role
+          if (roleChanged) showToast(`Peran Anda sekarang ${ROLE_LABEL[me.role] || me.role}`);
+        }
+      } catch (e) {}
+    }
+
+    // ---- Akun Saya (every role) ----
+    function openMyAccount() {
+      if (!currentUser) return;
+      document.getElementById("ma-who").textContent = `${currentUser.name} • ${currentUser.username} • ${ROLE_LABEL[currentUser.role] || currentUser.role}`;
+      ["ma-pw-current", "ma-pw-new", "ma-pw-new2", "ma-pin-pw", "ma-pin-new"].forEach(id => { document.getElementById(id).value = ""; });
+      ["ma-pw-error", "ma-pin-error"].forEach(id => { document.getElementById(id).textContent = ""; });
+      document.getElementById("ma-pin-section").style.display = PIN_ROLES_UI.includes(currentUser.role) ? "block" : "none";
+      openModal("modal-my-account");
+      document.querySelector("#modal-my-account .modal-card").scrollTop = 0;
+      document.getElementById("ma-pw-current").focus();
+    }
+
+    async function submitMyPassword() {
+      if (myAccountBusy) return;
+      const errEl = document.getElementById("ma-pw-error");
+      errEl.textContent = "";
+      const current = document.getElementById("ma-pw-current").value;
+      const next = document.getElementById("ma-pw-new").value;
+      const again = document.getElementById("ma-pw-new2").value;
+      const fail = (msg, field) => { errEl.textContent = msg; document.getElementById(field).focus(); };
+      if (!current) return fail("Password saat ini wajib diisi", "ma-pw-current");
+      if (next.length < 8) return fail("Password baru minimal 8 karakter", "ma-pw-new");
+      if (next.length > 72) return fail("Password baru maksimal 72 karakter", "ma-pw-new");
+      if (next !== again) return fail("Ulangi password baru dengan sama persis", "ma-pw-new2");
+      if (next === current) return fail("Password baru harus berbeda dari password saat ini", "ma-pw-new");
+
+      myAccountBusy = true;
+      document.getElementById("ma-pw-save").disabled = true;
+      try {
+        const res = await api('/api/me/password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }) });
+        authToken = res.token; // the server ended the other sessions and issued this one
+        localStorage.setItem("pos_jwt", authToken);
+        closeModal("modal-my-account");
+        showToast("Password diganti. Login di perangkat lain berakhir.");
+      } catch (e) {
+        errEl.textContent = e.message;
+      } finally {
+        myAccountBusy = false;
+        document.getElementById("ma-pw-save").disabled = false;
+      }
+    }
+
+    async function submitMyPin() {
+      if (myAccountBusy) return;
+      const errEl = document.getElementById("ma-pin-error");
+      errEl.textContent = "";
+      const pw = document.getElementById("ma-pin-pw").value;
+      const pin = document.getElementById("ma-pin-new").value.trim();
+      if (!pw) { errEl.textContent = "Password saat ini wajib diisi"; document.getElementById("ma-pin-pw").focus(); return; }
+      if (!/^\d{4}$/.test(pin)) { errEl.textContent = "PIN harus 4 digit angka"; document.getElementById("ma-pin-new").focus(); return; }
+
+      myAccountBusy = true;
+      document.getElementById("ma-pin-save").disabled = true;
+      try {
+        await api('/api/me/pin', { method: 'POST', body: JSON.stringify({ current_password: pw, pin }) });
+        closeModal("modal-my-account");
+        showToast("PIN diganti");
+      } catch (e) {
+        errEl.textContent = e.message;
+      } finally {
+        myAccountBusy = false;
+        document.getElementById("ma-pin-save").disabled = false;
+      }
+    }
+
+    // ---- Kelola User (admin) ----
+    async function fetchUsersAdmin() {
+      if (!isAdminRole()) return;
+      try {
+        adminUsers = await api('/api/admin/users');
+        renderUsersAdmin();
+      } catch (e) {}
+    }
+
+    async function afterUserChange(editedId) {
+      await fetchUsersAdmin();
+      if (currentUser && editedId === currentUser.id) await syncMe(); // my own name changed
+    }
+
+    function renderUsersAdmin() {
+      const active = adminUsers.filter(u => u.is_active).length;
+      const inactive = adminUsers.length - active;
+      document.getElementById("usr-summary").textContent = `${active} aktif${inactive ? ` • ${inactive} nonaktif` : ""}`;
+      const activeAdmins = adminUsers.filter(u => u.role === "admin" && u.is_active).length;
+      const tbody = document.getElementById("usr-table-body");
+      if (adminUsers.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Belum ada user.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = adminUsers.map(u => {
+        const self = !!currentUser && u.id === currentUser.id;
+        const inactiveRow = !u.is_active;
+        const hasPinRole = PIN_ROLES_UI.includes(u.role);
+        let blocked = "";
+        if (self) blocked = "Anda tidak bisa menonaktifkan akun sendiri";
+        else if (u.role === "admin" && u.is_active && activeAdmins <= 1) blocked = "Admin aktif terakhir tidak bisa dinonaktifkan";
+        else if (u.has_open_shift) blocked = "Masih punya shift yang terbuka. Tutup shift itu dulu.";
+
+        const toggle = inactiveRow
+          ? `<button class="btn btn-subtle btn-touch" onclick="toggleUserActive(${u.id}, true)">Aktifkan</button>`
+          : `<button class="btn btn-subtle btn-touch" ${blocked ? `disabled title="${esc(blocked)}"` : ""} onclick="toggleUserActive(${u.id}, false)">Nonaktifkan</button>`;
+        const passwordBtn = self
+          ? `<button class="btn btn-subtle btn-touch" disabled title="Gunakan tombol 🔑 Akun Saya untuk mengganti password sendiri">Password</button>`
+          : `<button class="btn btn-subtle btn-touch" onclick="openUserSecret(${u.id}, 'password')">Password</button>`;
+        const pinBtn = hasPinRole ? `<button class="btn btn-subtle btn-touch" onclick="openUserSecret(${u.id}, 'pin')">PIN</button>` : "";
+
+        return `
+          <tr class="${inactiveRow ? "mm-row-inactive" : ""}">
+            <td><strong>${esc(u.name)}</strong>${self ? ` <span style="font-size:10px;color:var(--text-muted);">(Anda)</span>` : ""}</td>
+            <td>${esc(u.username)}</td>
+            <td><span class="role-badge ${esc(u.role)}">${esc(ROLE_LABEL[u.role] || u.role)}</span></td>
+            <td>${hasPinRole ? (u.has_pin ? "✓ ada" : `<span style="color:var(--warning);">belum diatur</span>`) : "–"}</td>
+            <td>${inactiveRow
+              ? `<span class="status-badge" style="background:var(--text-muted);">Nonaktif</span>`
+              : `<span class="status-badge ok">Aktif</span>`}${u.has_open_shift ? ` <span style="font-size:10px;color:var(--text-muted);">shift terbuka</span>` : ""}</td>
+            <td><div class="usr-actions">
+              <button class="btn btn-subtle btn-touch" onclick="openUserForm(${u.id})">Ubah</button>
+              ${passwordBtn}${pinBtn}${toggle}
+            </div></td>
+          </tr>`;
+      }).join("");
+    }
+
+    function openUserForm(id) {
+      const u = id ? adminUsers.find(x => x.id === id) : null;
+      if (id && !u) return;
+      userFormId = u ? u.id : null;
+      userFormOrigRole = u ? u.role : null;
+      userFormBusy = false;
+      document.getElementById("uf-save").disabled = false;
+      document.getElementById("uf-title").textContent = u ? "✏️ Ubah User" : "➕ Tambah User";
+      document.getElementById("uf-name").value = u ? u.name : "";
+      document.getElementById("uf-username").value = u ? u.username : "";
+      document.getElementById("uf-role").value = u ? u.role : "kasir";
+      document.getElementById("uf-role").disabled = !!(u && currentUser && u.id === currentUser.id); // not your own role
+      document.getElementById("uf-password").value = "";
+      document.getElementById("uf-pin").value = "";
+      document.getElementById("uf-error").textContent = "";
+      updateUserFormFields();
+      openModal("modal-user-form");
+      document.getElementById("uf-name").focus();
+    }
+
+    // Shows the password row only when adding, and the PIN row when a PIN has to be entered (a new supervisor / admin,
+    // or a kasir who becomes one)
+    function updateUserFormFields() {
+      const role = document.getElementById("uf-role").value;
+      const creating = userFormId === null;
+      document.getElementById("uf-password-wrap").style.display = creating ? "block" : "none";
+      const needsPin = PIN_ROLES_UI.includes(role) && (creating || userFormOrigRole === "kasir");
+      document.getElementById("uf-pin-wrap").style.display = needsPin ? "block" : "none";
+
+      let note = "";
+      if (!creating && document.getElementById("uf-role").disabled) note = "Anda tidak bisa mengubah peran akun sendiri.";
+      else if (!creating && role !== userFormOrigRole) {
+        note = PIN_ROLES_UI.includes(role)
+          ? (PIN_ROLES_UI.includes(userFormOrigRole) ? "" : "Mengisi PIN wajib untuk supervisor dan admin.")
+          : "PIN user ini akan dihapus.";
+      } else if (creating) {
+        note = role === "kasir" ? "Kasir membuat pesanan dan menerima pembayaran." : "Supervisor dan admin wajib punya PIN untuk otorisasi diskon besar dan void.";
+      }
+      document.getElementById("uf-role-note").textContent = note;
+    }
+
+    async function submitUserForm() {
+      if (userFormBusy) return;
+      const errEl = document.getElementById("uf-error");
+      errEl.textContent = "";
+      const fail = (msg, field) => { errEl.textContent = msg; document.getElementById(field).focus(); };
+      const creating = userFormId === null;
+
+      const name = document.getElementById("uf-name").value.trim();
+      if (!name) return fail("Nama wajib diisi", "uf-name");
+      if (name.length > 100) return fail("Nama maksimal 100 karakter", "uf-name");
+      const username = document.getElementById("uf-username").value.trim().toLowerCase();
+      if (!/^[a-z0-9._-]{3,30}$/.test(username)) return fail("Username 3-30 karakter: huruf, angka, titik, garis bawah, atau strip", "uf-username");
+      const body = { name, username, role: document.getElementById("uf-role").value };
+
+      if (creating) {
+        const pw = document.getElementById("uf-password").value;
+        if (pw.length < 8) return fail("Password minimal 8 karakter", "uf-password");
+        if (pw.length > 72) return fail("Password maksimal 72 karakter", "uf-password");
+        body.password = pw;
+      }
+      if (document.getElementById("uf-pin-wrap").style.display !== "none") {
+        const pin = document.getElementById("uf-pin").value.trim();
+        if (!/^\d{4}$/.test(pin)) return fail("PIN harus 4 digit angka", "uf-pin");
+        body.pin = pin;
+      }
+
+      userFormBusy = true;
+      const btn = document.getElementById("uf-save");
+      btn.disabled = true;
+      try {
+        const res = await api(creating ? '/api/admin/users' : `/api/admin/users/${userFormId}`, {
+          method: creating ? 'POST' : 'PUT',
+          body: JSON.stringify(body)
+        });
+        closeModal("modal-user-form");
+        showToast(creating ? `User ${res.user.username} ditambahkan` : `User ${res.user.username} diperbarui`);
+        afterUserChange(res.user.id);
+      } catch (e) {
+        errEl.textContent = e.message; // e.g. username taken, PIN already used: the dialog stays open
+      } finally {
+        userFormBusy = false;
+        btn.disabled = false;
+      }
+    }
+
+    function openUserSecret(id, mode) {
+      const u = adminUsers.find(x => x.id === id);
+      if (!u) return;
+      userSecretId = id;
+      userSecretMode = mode;
+      userSecretBusy = false;
+      document.getElementById("us-save").disabled = false;
+      const pin = mode === "pin";
+      document.getElementById("us-title").textContent = pin ? "🔢 Atur PIN" : "🔑 Reset Password";
+      document.getElementById("us-who").textContent = `${u.name} (${u.username})`;
+      document.getElementById("us-new-label").textContent = pin ? "PIN baru (4 digit)" : "Password baru (minimal 8 karakter)";
+      const input = document.getElementById("us-new");
+      input.value = "";
+      input.maxLength = pin ? 4 : 72;
+      input.inputMode = pin ? "numeric" : "text";
+      input.autocomplete = pin ? "off" : "new-password";
+      document.getElementById("us-new2").value = "";
+      document.getElementById("us-repeat-wrap").style.display = pin ? "none" : "block";
+      document.getElementById("us-note").textContent = pin
+        ? "PIN tidak boleh sama dengan PIN supervisor atau admin lain."
+        : "Semua sesi login user ini berakhir seketika. Berikan password baru kepadanya.";
+      document.getElementById("us-error").textContent = "";
+      openModal("modal-user-secret");
+      input.focus();
+    }
+
+    async function submitUserSecret() {
+      if (userSecretBusy) return;
+      const errEl = document.getElementById("us-error");
+      errEl.textContent = "";
+      const pin = userSecretMode === "pin";
+      const value = document.getElementById("us-new").value;
+      if (pin) {
+        if (!/^\d{4}$/.test(value.trim())) { errEl.textContent = "PIN harus 4 digit angka"; document.getElementById("us-new").focus(); return; }
+      } else {
+        if (value.length < 8) { errEl.textContent = "Password minimal 8 karakter"; document.getElementById("us-new").focus(); return; }
+        if (value.length > 72) { errEl.textContent = "Password maksimal 72 karakter"; document.getElementById("us-new").focus(); return; }
+        if (value !== document.getElementById("us-new2").value) { errEl.textContent = "Ulangi password dengan sama persis"; document.getElementById("us-new2").focus(); return; }
+      }
+
+      userSecretBusy = true;
+      const btn = document.getElementById("us-save");
+      btn.disabled = true;
+      try {
+        const res = pin
+          ? await api(`/api/admin/users/${userSecretId}/pin`, { method: 'PUT', body: JSON.stringify({ pin: value.trim() }) })
+          : await api(`/api/admin/users/${userSecretId}/password`, { method: 'POST', body: JSON.stringify({ password: value }) });
+        closeModal("modal-user-secret");
+        showToast(pin ? `PIN ${res.user.username} diatur` : `Password ${res.user.username} direset. Sesinya berakhir.`);
+        afterUserChange(res.user.id);
+      } catch (e) {
+        errEl.textContent = e.message;
+      } finally {
+        userSecretBusy = false;
+        btn.disabled = false;
+      }
+    }
+
+    async function toggleUserActive(id, makeActive) {
+      if (usersBusy) return;
+      const u = adminUsers.find(x => x.id === id);
+      if (!u) return;
+      const hasPinRole = PIN_ROLES_UI.includes(u.role);
+      if (!makeActive) {
+        const yes = await askConfirm({
+          title: "Nonaktifkan user?",
+          message: `${u.name} (${u.username}) tidak bisa login lagi dan sesi yang sedang berjalan berakhir seketika. Riwayat pesanan dan shiftnya tetap ada. Bisa diaktifkan kembali kapan saja.`,
+          okLabel: "Nonaktifkan",
+          danger: true
+        });
+        if (!yes) return;
+      } else if (hasPinRole) {
+        const yes = await askConfirm({
+          title: "Aktifkan user?",
+          message: `${u.name} akan bisa login lagi. PIN lamanya dihapus; atur PIN baru lewat tombol PIN supaya ia bisa memberi otorisasi.`,
+          okLabel: "Aktifkan"
+        });
+        if (!yes) return;
+      }
+      usersBusy = true;
+      try {
+        await api(`/api/admin/users/${id}/active`, { method: 'PATCH', body: JSON.stringify({ is_active: makeActive }) });
+        showToast(makeActive ? `${u.username} diaktifkan kembali` : `${u.username} dinonaktifkan`);
+        await fetchUsersAdmin();
+      } catch (e) {
+        // the server explains why (last admin, open shift, yourself): api() already showed it
+      } finally {
+        usersBusy = false;
+      }
+    }
+
     // 11. Notifications
     function renderNotifications() {
       const container = document.getElementById("notif-list-container");
@@ -3998,6 +4689,11 @@
         document.getElementById("tab-btn-kelolamenu").classList.add("active");
         fetchCategories().then(fetchMenuAdmin);
       }
+      if (tabId === "users") {
+        if (!isAdminRole()) { switchTab("meja"); return; }
+        document.getElementById("tab-btn-users").classList.add("active");
+        fetchUsersAdmin();
+      }
       if (tabId === "laporan") {
         btns[2].classList.add("active");
         fetchReports();
@@ -4058,6 +4754,7 @@
       updateUserProfileHeader();
       startClock();
       fetchAllData();
+      syncMe();
       restoreDraft();
 
       // Poll active orders, tables, summary every 15 seconds
@@ -4069,6 +4766,7 @@
           fetchSummary();
           fetchAlerts();
           fetchReservations();
+          syncMe(); // follows role / name changes and ends this session if the account was deactivated
         }
       }, 15000);
     }
