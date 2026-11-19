@@ -11,6 +11,7 @@
     "db:reset": "docker compose down -v && docker compose up -d",
     "db:logs": "docker compose logs -f db",
     "db:seed": "node seed-users.js",
+    "db:migrate": "node migrate.js",
     "db:shell": "docker exec -it kasir-db mysql -uroot -p kasir_restoran",
     "db:dump": "docker exec kasir-db sh -c \"exec mysqldump -uroot -p\\\"$MYSQL_ROOT_PASSWORD\\\" --routines --no-tablespaces --databases kasir_restoran\" > database/kasir_restoran.sql"
   },

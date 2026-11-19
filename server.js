@@ -100,6 +100,100 @@ async function buildOrderItems(conn, items, priceSnapshot = new Map()) {
 
 const ACTIVE_ORDER_STATUSES = ['baru', 'diproses', 'siap_saji', 'belum_dibayar', 'hold'];
 
+// ---------- STOCK HELPERS ----------
+
+const MAX_STOCK_CHANGE = 100000;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// The ONE SQL definition of a product's stock status: 'habis' | 'menipis' | 'ok'
+// (the frontend mirrors it in getStockStatus). `a` is the table alias of `products`.
+function stockStatusSql(a = 'p') {
+  return `CASE
+    WHEN ${a}.stock <= 0 OR ${a}.is_available = 0 THEN 'habis'
+    WHEN ${a}.stock <= ${a}.low_stock_threshold THEN 'menipis'
+    ELSE 'ok'
+  END`;
+}
+
+const PRODUCT_SELECT = `
+  SELECT p.id, p.category_id, c.name AS category_name, p.name, p.price, p.image_url,
+         p.stock, p.low_stock_threshold, p.is_available, p.is_active,
+         ${stockStatusSql('p')} AS stock_status
+  FROM products p
+  JOIN categories c ON c.id = p.category_id`;
+
+// Whole number from a JSON number or a string of digits; anything else (decimals, "abc", null) -> null
+function parseWholeNumber(value) {
+  if (typeof value === 'number') return Number.isInteger(value) ? value : null;
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return parseInt(value.trim(), 10);
+  return null;
+}
+
+// Returns the supervisor/admin whose PIN matches, or null
+async function findSupervisorByPin(conn, pin) {
+  if (!pin) return null;
+  const [spvs] = await conn.query(
+    'SELECT id, name, pin_hash FROM users WHERE role IN ("supervisor", "admin") AND pin_hash IS NOT NULL AND is_active = 1'
+  );
+  for (const spv of spvs) {
+    if (await bcrypt.compare(String(pin), spv.pin_hash)) return spv;
+  }
+  return null;
+}
+
+async function insertStockMovement(conn, { productId, type, qtyChange, stockAfter, note, orderId, userId }) {
+  await conn.query(
+    `INSERT INTO stock_movements (product_id, type, qty_change, stock_after, note, order_id, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [productId, type, qtyChange, stockAfter, note ? String(note).slice(0, 255) : null, orderId || null, userId]
+  );
+}
+
+// Decreases (sale, direction -1) or restores (void, direction +1) stock for the items of an order and records a
+// stock_movements row per product. Runs inside the caller's transaction.
+// Returns the products that ended at or below their low-stock threshold after a sale.
+async function applyOrderStock(conn, items, direction, { orderId, userId, note }) {
+  const qtyByProduct = new Map();
+  items.forEach(it => qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) || 0) + Number(it.qty)));
+
+  const lowStock = [];
+  // fixed order (by id) so concurrent orders lock rows in the same order
+  for (const productId of [...qtyByProduct.keys()].sort((a, b) => a - b)) {
+    const [rows] = await conn.query(
+      'SELECT id, name, stock, low_stock_threshold FROM products WHERE id = ? FOR UPDATE',
+      [productId]
+    );
+    if (rows.length === 0) continue;
+    const prod = rows[0];
+
+    const newStock = Math.max(0, prod.stock + qtyByProduct.get(productId) * direction);
+    const change = newStock - prod.stock;
+    if (change === 0) continue;
+
+    await conn.query('UPDATE products SET stock = ? WHERE id = ?', [newStock, productId]);
+    await insertStockMovement(conn, {
+      productId,
+      type: direction < 0 ? 'sale' : 'void_restore',
+      qtyChange: change,
+      stockAfter: newStock,
+      note,
+      orderId,
+      userId
+    });
+
+    if (direction < 0 && newStock <= prod.low_stock_threshold) {
+      lowStock.push({ id: prod.id, name: prod.name, stock: newStock, low_stock_threshold: prod.low_stock_threshold });
+    }
+  }
+  return lowStock;
+}
+
 // Generates sequential zero-padded invoice number: INV-0001
 async function generateOrderNo(conn) {
   const [rows] = await conn.query('SELECT id, order_no FROM orders ORDER BY id DESC LIMIT 1 FOR UPDATE');
@@ -221,16 +315,7 @@ app.get('/api/categories', async (req, res) => {
 app.get('/api/products', async (req, res) => {
   try {
     const { category_id, q } = req.query;
-    let sql = `
-      SELECT p.id, p.category_id, c.name AS category_name, p.name, p.price, p.image_url,
-             p.stock, p.low_stock_threshold, p.is_available, p.is_active,
-             CASE
-               WHEN p.stock = 0 OR p.is_available = 0 THEN 'habis'
-               WHEN p.stock <= p.low_stock_threshold THEN 'menipis'
-               ELSE 'ok'
-             END AS stock_status
-      FROM products p
-      JOIN categories c ON c.id = p.category_id
+    let sql = `${PRODUCT_SELECT}
       WHERE p.is_active = 1
     `;
     const params = [];
@@ -253,15 +338,159 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// PATCH /api/products/:id/availability { is_available }
-app.patch('/api/products/:id/availability', async (req, res) => {
+// GET /api/products/stock-summary -> { ok, menipis, habis, total }
+app.get('/api/products/stock-summary', async (req, res) => {
   try {
-    const { id } = req.params;
-    const is_available = req.body.is_available ? 1 : 0;
-    await db.query('UPDATE products SET is_available = ? WHERE id = ?', [is_available, id]);
-    res.json({ ok: true, id: Number(id), is_available });
+    const [rows] = await db.query(`
+      SELECT ${stockStatusSql('p')} AS status, COUNT(*) AS n
+      FROM products p
+      WHERE p.is_active = 1
+      GROUP BY status
+    `);
+    const summary = { ok: 0, menipis: 0, habis: 0, total: 0 };
+    rows.forEach(r => {
+      summary[r.status] = Number(r.n);
+      summary.total += Number(r.n);
+    });
+    res.json(summary);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/products/:id/availability { is_available }
+// Idempotent; an item with stock 0 can not be marked sold out (it already is).
+app.patch('/api/products/:id/availability', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const raw = req.body.is_available;
+    let target = null;
+    if (raw === 0 || raw === false || raw === '0' || raw === 'false') target = 0;
+    if (raw === 1 || raw === true || raw === '1' || raw === 'true') target = 1;
+    if (target === null) throw new HttpError(400, 'is_available harus 0 atau 1');
+
+    await conn.beginTransaction();
+    const [rows] = await conn.query('SELECT id, stock, is_available FROM products WHERE id = ? FOR UPDATE', [req.params.id]);
+    if (rows.length === 0) throw new HttpError(404, 'Produk tidak ditemukan');
+    const prod = rows[0];
+
+    if (Number(prod.is_available) === target) {
+      await conn.commit();
+      return res.json({ ok: true, id: prod.id, is_available: target, changed: false });
+    }
+    if (target === 0 && prod.stock <= 0) throw new HttpError(400, 'Stok sudah 0');
+
+    await conn.query('UPDATE products SET is_available = ? WHERE id = ?', [target, prod.id]);
+    await conn.commit();
+    res.json({ ok: true, id: prod.id, is_available: target, changed: true });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/products/:id/stock { qty, note? } -> restock (adds qty, makes the product available again)
+app.post('/api/products/:id/stock', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const qty = parseWholeNumber(req.body.qty);
+    if (qty === null || qty < 1) throw new HttpError(400, 'Jumlah harus bilangan bulat positif (minimal 1)');
+    if (qty > MAX_STOCK_CHANGE) throw new HttpError(400, `Jumlah terlalu besar (maksimal ${MAX_STOCK_CHANGE})`);
+    const note = cleanNote(req.body.note);
+
+    await conn.beginTransaction();
+    const [rows] = await conn.query('SELECT id, stock FROM products WHERE id = ? AND is_active = 1 FOR UPDATE', [req.params.id]);
+    if (rows.length === 0) throw new HttpError(404, 'Produk tidak ditemukan');
+    const prod = rows[0];
+
+    const newStock = prod.stock + qty;
+    await conn.query('UPDATE products SET stock = ?, is_available = 1 WHERE id = ?', [newStock, prod.id]);
+    await insertStockMovement(conn, {
+      productId: prod.id, type: 'restock', qtyChange: qty, stockAfter: newStock, note, userId: req.user.id
+    });
+    await conn.commit();
+
+    const [updated] = await db.query(`${PRODUCT_SELECT} WHERE p.id = ?`, [prod.id]);
+    res.json({ ok: true, qty, product: updated[0] });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/products/:id/stock/correct { new_stock, reason, pin } -> stock-taking correction (supervisor/admin PIN)
+app.post('/api/products/:id/stock/correct', async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const newStock = parseWholeNumber(req.body.new_stock);
+    if (newStock === null || newStock < 0) throw new HttpError(400, 'Stok baru harus bilangan bulat 0 atau lebih');
+    if (newStock > MAX_STOCK_CHANGE) throw new HttpError(400, `Stok terlalu besar (maksimal ${MAX_STOCK_CHANGE})`);
+    const reason = cleanNote(req.body.reason);
+    if (!reason) throw new HttpError(400, 'Alasan koreksi wajib diisi');
+    if (!req.body.pin) throw new HttpError(400, 'PIN supervisor wajib diisi');
+
+    const supervisor = await findSupervisorByPin(db, req.body.pin);
+    if (!supervisor) throw new HttpError(403, 'PIN supervisor salah');
+
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      'SELECT id, name, stock, low_stock_threshold FROM products WHERE id = ? AND is_active = 1 FOR UPDATE',
+      [req.params.id]
+    );
+    if (rows.length === 0) throw new HttpError(404, 'Produk tidak ditemukan');
+    const prod = rows[0];
+
+    const change = newStock - prod.stock;
+    if (change === 0) throw new HttpError(400, 'Stok baru sama dengan stok saat ini');
+
+    await conn.query('UPDATE products SET stock = ? WHERE id = ?', [newStock, prod.id]);
+    await insertStockMovement(conn, {
+      productId: prod.id,
+      type: 'correction',
+      qtyChange: change,
+      stockAfter: newStock,
+      note: `${reason} (otorisasi: ${supervisor.name})`,
+      userId: req.user.id
+    });
+    await conn.commit();
+
+    const [updated] = await db.query(`${PRODUCT_SELECT} WHERE p.id = ?`, [prod.id]);
+    const low = newStock <= prod.low_stock_threshold
+      ? [{ id: prod.id, name: prod.name, stock: newStock, low_stock_threshold: prod.low_stock_threshold }]
+      : [];
+    res.json({ ok: true, qty_change: change, product: updated[0], low_stock: low });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// GET /api/products/:id/stock-movements?limit=20
+app.get('/api/products/:id/stock-movements', async (req, res) => {
+  try {
+    const limit = Math.min(100, Math.max(1, parseWholeNumber(req.query.limit) || 20));
+    const [prods] = await db.query('SELECT id, name, stock FROM products WHERE id = ?', [req.params.id]);
+    if (prods.length === 0) throw new HttpError(404, 'Produk tidak ditemukan');
+
+    const [rows] = await db.query(`
+      SELECT m.id, m.type, m.qty_change, m.stock_after, m.note, m.order_id, o.order_no,
+             m.user_id, u.name AS user_name, m.created_at
+      FROM stock_movements m
+      JOIN users u ON u.id = m.user_id
+      LEFT JOIN orders o ON o.id = m.order_id
+      WHERE m.product_id = ?
+      ORDER BY m.created_at DESC, m.id DESC
+      LIMIT ?
+    `, [req.params.id, limit]);
+    res.json({ product: prods[0], movements: rows });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -736,13 +965,12 @@ app.post('/api/orders/:id/pay', async (req, res) => {
       orderId
     ]);
 
-    // Decrease product stock
-    for (const it of items) {
-      await conn.query(
-        'UPDATE products SET stock = GREATEST(0, stock - ?) WHERE id = ?',
-        [it.qty, it.product_id]
-      );
-    }
+    // Decrease product stock (+ 'sale' rows in stock_movements, same transaction)
+    const lowStock = await applyOrderStock(conn, items, -1, {
+      orderId: order.id,
+      userId: req.user.id,
+      note: order.order_no
+    });
 
     // Free table if dine_in
     if (order.order_type === 'dine_in' && order.table_id) {
@@ -754,7 +982,8 @@ app.post('/api/orders/:id/pay', async (req, res) => {
       ok: true,
       change,
       total: totals.total,
-      total_paid: totalPayment
+      total_paid: totalPayment,
+      low_stock: lowStock
     });
   } catch (err) {
     await conn.rollback();
@@ -796,11 +1025,13 @@ app.post('/api/orders/:id/void', async (req, res) => {
 
     const [items] = await conn.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
 
-    // If order was already paid ('selesai'), restore product stock
+    // If order was already paid ('selesai'), restore product stock (+ 'void_restore' rows in stock_movements)
     if (order.status === 'selesai') {
-      for (const it of items) {
-        await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [it.qty, it.product_id]);
-      }
+      await applyOrderStock(conn, items, +1, {
+        orderId: order.id,
+        userId: req.user.id,
+        note: `Void ${order.order_no}`
+      });
     }
 
     // Free table if dine_in
@@ -1063,13 +1294,14 @@ app.get('/api/dashboard/best-sellers', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT oi.product_id, oi.product_name AS name, c.name AS category,
-             SUM(oi.qty) AS qty, SUM(oi.qty * oi.price) AS revenue
+             SUM(oi.qty) AS qty, SUM(oi.qty * oi.price) AS revenue,
+             pr.stock, pr.low_stock_threshold, pr.is_available
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
       JOIN products pr ON pr.id = oi.product_id
       JOIN categories c ON c.id = pr.category_id
       WHERE o.status = 'selesai' AND DATE(o.closed_at) = CURDATE()
-      GROUP BY oi.product_id, oi.product_name, c.name
+      GROUP BY oi.product_id, oi.product_name, c.name, pr.stock, pr.low_stock_threshold, pr.is_available
       ORDER BY qty DESC
       LIMIT 5
     `);
@@ -1148,10 +1380,11 @@ app.get('/api/dashboard/alerts', async (req, res) => {
   try {
     // Low stock products
     const [lowStock] = await db.query(`
-      SELECT id, name, stock, low_stock_threshold, is_available
-      FROM products
-      WHERE is_active = 1 AND (stock <= low_stock_threshold OR is_available = 0)
-      ORDER BY stock ASC
+      SELECT p.id, p.name, p.stock, p.low_stock_threshold, p.is_available,
+             ${stockStatusSql('p')} AS stock_status
+      FROM products p
+      WHERE p.is_active = 1 AND ${stockStatusSql('p')} <> 'ok'
+      ORDER BY p.stock ASC
     `);
 
     // Online delivery orders with status 'baru'

@@ -179,6 +179,21 @@ Membuat atau menyimpan pesanan butuh **shift yang sudah dibuka** (kasir `budi` s
 - Perubahan yang belum disimpan disimpan sementara di browser, jadi tidak hilang kalau halaman di-refresh.
 - Pesanan kosong tidak bisa disimpan, di-hold, atau dibayar.
 
+### Kelola Stok
+
+Tombol **Tambah Stok** ada di setiap kartu menu (untuk semua peran) dan di tab **📦 Kelola Stok**.
+
+| Aksi | Hasilnya |
+|---|---|
+| **Tambah Stok** | Isi jumlah (bilangan bulat ≥ 1, atau pakai chip +5 / +10 / +25 / +50) dan catatan opsional. Stok bertambah dan menu otomatis tersedia lagi. |
+| **Koreksi** (tab Kelola Stok) | Mengatur stok ke angka pasti saat stock opname. Wajib alasan dan **PIN Supervisor / Admin**; tercatat sebagai koreksi, bukan restock. |
+| **Tandai Habis / Aktifkan Kembali** | Hanya muncul untuk menu yang stoknya masih ada. Menu dengan stok 0 sudah otomatis *Habis* dan hanya punya tombol Tambah Stok. |
+| Klik baris produk (tab Kelola Stok) | Menampilkan 20 riwayat stok terakhir: restock, koreksi, penjualan, dan void. |
+
+Status stok: **Habis** (stok 0 atau ditandai habis), **Menipis** (stok ≤ batas, bawaan 5), **Aman**. Saat pembayaran atau koreksi membuat stok menipis, muncul notifikasi satu kali.
+
+Kalau database kamu dibuat sebelum fitur ini, jalankan `npm run db:migrate` sekali untuk menambah tabel riwayat stok.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -210,6 +225,7 @@ Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan d
 | `npm run db:logs` | Melihat log database (`Ctrl + C` untuk keluar) |
 | `npm run db:shell` | Membuka MySQL interaktif (diminta password root, yaitu `DB_PASSWORD` di `.env`) |
 | `npm run db:seed` | Membuat ulang password dan PIN semua pengguna |
+| `npm run db:migrate` | Menambahkan tabel/kolom baru dari `database/migrations/` ke database yang sudah ada, **tanpa menghapus data**. Aman dijalankan berulang kali. Jalankan setelah memperbarui kode (`git pull`) |
 | `npm run db:reset` | **Menghapus semua data** dan membuat ulang database dari `database/kasir_restoran.sql`. Setelahnya jalankan `npm run db:seed` lagi |
 | `npm run db:dump` | Mengekspor kondisi database sekarang ke `database/kasir_restoran.sql` |
 
@@ -284,8 +300,10 @@ restoran/
 ├── server.js                    # Server Express dan semua endpoint API
 ├── db.js                        # Koneksi MySQL
 ├── seed-users.js                # Pembuat password dan PIN pengguna
+├── migrate.js                   # Menjalankan file di database/migrations/
 ├── public/index.html            # Tampilan aplikasi (frontend)
-├── database/kasir_restoran.sql  # Skema dan data awal database
+├── database/kasir_restoran.sql  # Skema dan data awal database (instalasi baru)
+├── database/migrations/         # Pembaruan skema untuk database yang sudah ada
 ├── docker-compose.yml           # Konfigurasi MySQL (dan app, profil "full")
 ├── Dockerfile                   # Image Docker untuk aplikasi
 ├── .env.example                 # Contoh pengaturan; salin menjadi .env

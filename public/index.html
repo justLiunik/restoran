@@ -76,8 +76,8 @@
     }
     
     .main-workspace { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-    .nav-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 8px; overflow-x: auto; }
-    .tab-btn { background: transparent; border: none; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+    .nav-tabs { display: flex; flex-wrap: wrap; gap: 4px 6px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .tab-btn { background: transparent; border: none; padding: 8px 11px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
     .tab-btn.active { background: var(--primary-subtle); color: var(--primary); }
     
     .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
@@ -116,7 +116,27 @@
     .menu-info { padding: 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
     .menu-title { font-size: 13px; font-weight: 700; line-height: 1.2; }
     .menu-price { font-size: 13px; font-weight: 700; color: var(--primary); margin-top: auto; }
-    .menu-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+    .menu-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .menu-cat-line { font-size: 10px; color: var(--text-muted); }
+    .menu-btn-row { display: flex; flex-wrap: wrap; gap: 4px; }
+    .menu-btn-row .btn { flex: 1 1 auto; justify-content: center; font-size: 10px; padding: 4px 6px; white-space: nowrap; }
+    .menu-stock-note { font-size: 10px; color: var(--text-muted); }
+    .menu-item-card.soldout .menu-img-wrap img { filter: grayscale(0.85); opacity: 0.8; }
+
+    /* Status stok */
+    .status-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; color: #fff; }
+    .status-badge.habis { background: var(--danger); }
+    .status-badge.menipis { background: var(--warning); }
+    .status-badge.ok { background: var(--success); }
+    .stock-preview { font-size: 13px; font-weight: 700; padding: 8px 10px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; margin: 4px 0; }
+    .field-error { font-size: 11px; font-weight: 600; color: var(--danger); min-height: 15px; margin: 2px 0 6px; }
+    .modal-field-label { display: block; font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
+    .modal-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--bg-card); color: var(--text-main); }
+    .stock-row { cursor: pointer; }
+    .stock-row.selected td { background: var(--primary-subtle); }
+    .mv-plus { color: var(--success); font-weight: 700; }
+    .mv-minus { color: var(--danger); font-weight: 700; }
+    .qty-btn.at-cap { opacity: 0.4; }
     
     /* Panel = kolom penuh: header tetap, daftar item menyerap sisa ruang (scroll), footer ringkas di bawah */
     .order-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; height: calc(100vh - 92px); height: calc(100dvh - 92px); min-height: 460px; position: sticky; top: 76px; box-shadow: var(--shadow); overflow: hidden; }
@@ -305,6 +325,7 @@
         <button class="tab-btn" onclick="switchTab('menu')">🍽️ Katalog Menu</button>
         <button class="tab-btn" onclick="switchTab('laporan')">📊 Penjualan & Laporan</button>
         <button class="tab-btn" onclick="switchTab('transaksi')">🧾 Riwayat Transaksi</button>
+        <button class="tab-btn" onclick="switchTab('stok')">📦 Kelola Stok</button>
       </div>
 
       <!-- TAB 1: MEJA & PESANAN AKTIF -->
@@ -370,9 +391,58 @@
                 <th>Kategori</th>
                 <th>Terjual</th>
                 <th>Total Pendapatan</th>
+                <th>Stok</th>
               </tr>
             </thead>
             <tbody id="top-sellers-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 5: KELOLA STOK -->
+      <div id="tab-pane-stok" style="display:none;flex-direction:column;gap:16px;">
+        <div class="card">
+          <div class="card-title-bar">
+            <div class="card-title">📦 Kelola Stok</div>
+            <span style="font-size:12px;font-weight:700;" id="stock-summary-line">Memuat...</span>
+          </div>
+          <div class="menu-filter-bar">
+            <div class="category-pills">
+              <button class="pill-btn active" id="sf-semua" onclick="setStockFilter('semua')">Semua</button>
+              <button class="pill-btn" id="sf-menipis" onclick="setStockFilter('menipis')">Menipis</button>
+              <button class="pill-btn" id="sf-habis" onclick="setStockFilter('habis')">Habis</button>
+            </div>
+            <input type="text" class="search-box" id="stock-search-input" placeholder="Cari menu..." oninput="handleStockSearch(this.value)">
+          </div>
+          <table class="table-responsive" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>Produk</th>
+                <th>Kategori</th>
+                <th>Stok</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="stock-table-body"></tbody>
+          </table>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Urut dari stok paling sedikit. Klik baris produk untuk melihat 20 riwayat stok terakhir.</div>
+        </div>
+
+        <div class="card" id="stock-history-card" style="display:none;">
+          <div class="card-title" id="stock-history-title">🕘 Riwayat Stok</div>
+          <table class="table-responsive" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Jenis</th>
+                <th>Perubahan</th>
+                <th>Stok Akhir</th>
+                <th>Catatan</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody id="stock-history-body"></tbody>
           </table>
         </div>
       </div>
@@ -514,6 +584,61 @@
         <button class="btn btn-subtle" onclick="unsavedChoice('batal')">Batal</button>
         <button class="btn btn-danger" onclick="unsavedChoice('buang')">Buang</button>
         <button class="btn btn-primary" id="btn-unsaved-save" onclick="unsavedChoice('simpan')">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TAMBAH STOK -->
+  <div class="modal-overlay" id="modal-restock">
+    <div class="modal-card" style="max-width:380px;">
+      <div class="card-title" style="margin-bottom:6px;">📦 Tambah Stok</div>
+      <div style="font-size:14px;font-weight:700;" id="restock-name">-</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Stok saat ini: <b id="restock-current">0</b></div>
+
+      <label class="modal-field-label" for="restock-qty">Jumlah Tambahan</label>
+      <input type="number" class="modal-input" id="restock-qty" min="1" step="1" inputmode="numeric" placeholder="Masukkan jumlah..."
+        oninput="updateRestockPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();submitRestock();}">
+      <div class="note-chips" style="margin:8px 0;">
+        <button type="button" class="note-chip" onclick="addRestockChip(5)">+5</button>
+        <button type="button" class="note-chip" onclick="addRestockChip(10)">+10</button>
+        <button type="button" class="note-chip" onclick="addRestockChip(25)">+25</button>
+        <button type="button" class="note-chip" onclick="addRestockChip(50)">+50</button>
+      </div>
+      <div class="stock-preview" id="restock-preview">Stok sekarang 0 → 0</div>
+      <div class="field-error" id="restock-error"></div>
+
+      <label class="modal-field-label" for="restock-note">Catatan (opsional)</label>
+      <input type="text" class="modal-input" id="restock-note" maxlength="120" placeholder="cth: Belanja pagi, Titipan supplier"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitRestock();}">
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button class="btn btn-subtle" onclick="closeModal('modal-restock')">Batal</button>
+        <button class="btn btn-primary" id="btn-restock-save" onclick="submitRestock()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: KOREKSI STOK -->
+  <div class="modal-overlay" id="modal-correction">
+    <div class="modal-card" style="max-width:380px;">
+      <div class="card-title" style="margin-bottom:6px;">🛠️ Koreksi Stok</div>
+      <div style="font-size:14px;font-weight:700;" id="correct-name">-</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Stok tercatat: <b id="correct-current">0</b> • untuk stock opname (jumlah fisik berbeda dari catatan)</div>
+
+      <label class="modal-field-label" for="correct-new">Stok Sebenarnya</label>
+      <input type="number" class="modal-input" id="correct-new" min="0" step="1" inputmode="numeric" placeholder="Jumlah fisik di gudang..."
+        oninput="updateCorrectionPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();submitCorrection();}">
+      <div class="stock-preview" id="correct-preview">Stok sekarang 0 → 0</div>
+
+      <label class="modal-field-label" for="correct-reason">Alasan Koreksi (wajib)</label>
+      <input type="text" class="modal-input" id="correct-reason" maxlength="120" placeholder="cth: Hasil stock opname, barang rusak"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitCorrection();}">
+      <div class="field-error" id="correct-error"></div>
+      <div style="font-size:11px;color:var(--text-muted);">Koreksi memerlukan PIN Supervisor / Admin.</div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button class="btn btn-subtle" onclick="closeModal('modal-correction')">Batal</button>
+        <button class="btn btn-primary" id="btn-correct-save" onclick="submitCorrection()">Simpan</button>
       </div>
     </div>
   </div>
@@ -702,6 +827,27 @@
     // Escape text before putting it into innerHTML / attributes
     function esc(s) {
       return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // ---------- STOCK STATUS (single source of truth) ----------
+    // 'habis'   : stock is 0 OR the item was manually marked sold out (is_available = 0)
+    // 'menipis' : stock <= low_stock_threshold (default 5)
+    // 'ok'      : everything else
+    // Used for the menu badge/buttons, add-to-order checks, alerts, best sellers and the "Kelola Stok" table.
+    // (The server mirrors this rule in stockStatusSql().)
+    function getStockStatus(p) {
+      const stock = Number(p.stock) || 0;
+      const markedSoldOut = p.is_available === 0 || p.is_available === false || p.is_available === "0";
+      if (stock <= 0 || markedSoldOut) return "habis";
+      const threshold = p.low_stock_threshold === undefined || p.low_stock_threshold === null ? 5 : Number(p.low_stock_threshold);
+      return stock <= threshold ? "menipis" : "ok";
+    }
+
+    const STOCK_STATUS_LABEL = { habis: "Habis", menipis: "Menipis", ok: "Aman" };
+
+    function stockStatusBadge(p) {
+      const s = getStockStatus(p);
+      return `<span class="status-badge ${s}">${STOCK_STATUS_LABEL[s]}</span>`;
     }
 
     // ---------- API CLIENT HELPER ----------
@@ -921,7 +1067,7 @@
         });
 
         (data.low_stock || []).forEach(p => {
-          if (p.stock === 0 || !p.is_available) {
+          if (getStockStatus(p) === "habis") {
             notifications.push({
               id: `prod-${p.id}`,
               title: "Stok Habis",
@@ -1218,16 +1364,29 @@
 
       menu.forEach(item => {
         const card = document.createElement("div");
-        card.className = "menu-item-card";
+        const status = getStockStatus(item);
+        card.className = `menu-item-card ${status === "habis" ? "soldout" : ""}`;
 
         let stockBadge = "";
-        if (item.stock === 0 || !item.is_available) {
+        if (status === "habis") {
           stockBadge = `<span class="badge-stock" style="background:var(--danger);color:#fff;">Habis</span>`;
-        } else if (item.stock <= item.low_stock_threshold) {
+        } else if (status === "menipis") {
           stockBadge = `<span class="badge-stock" style="background:var(--warning);color:#fff;">Sisa ${item.stock}</span>`;
         } else {
           stockBadge = `<span class="badge-stock" style="background:var(--success);color:#fff;">Stok ${item.stock}</span>`;
         }
+
+        // Buttons follow the real stock:
+        //   stock 0                       -> only "Tambah Stok" (there is nothing to mark as sold out)
+        //   stock > 0, available          -> "Tambah Stok" + "Tandai Habis"
+        //   stock > 0, marked sold out    -> "Tambah Stok" + "Aktifkan Kembali"
+        const hasStock = Number(item.stock) > 0;
+        const toggleBtn = !hasStock ? "" : (status === "habis"
+          ? `<button class="btn btn-subtle btn-sm" onclick="event.stopPropagation(); toggleSoldOut(${item.id})">Aktifkan Kembali</button>`
+          : `<button class="btn btn-subtle btn-sm" onclick="event.stopPropagation(); toggleSoldOut(${item.id})">Tandai Habis</button>`);
+        const restockBtn = `<button class="btn ${hasStock ? "btn-subtle" : "btn-primary"} btn-sm" onclick="event.stopPropagation(); openRestockModal(${item.id})">Tambah Stok</button>`;
+        const markedNote = (hasStock && status === "habis")
+          ? `<div class="menu-stock-note">Stok ${item.stock} • ditandai habis</div>` : "";
 
         const imgSrc = item.image_url || DEFAULT_MENU_IMAGES[item.id] || DEFAULT_MENU_IMAGES[((item.id - 1) % 15) + 1];
         const emoji = MENU_EMOJIS[item.id] || '🍽️';
@@ -1241,10 +1400,9 @@
             <div class="menu-title">${item.name}</div>
             <div class="menu-price">${formatRp(item.price)}</div>
             <div class="menu-actions">
-              <span style="font-size:10px;color:var(--text-muted);">${item.category_name || ''}</span>
-              <button class="btn btn-subtle btn-sm" style="font-size:10px;padding:2px 6px;" onclick="event.stopPropagation(); toggleSoldOut(${item.id}, ${item.is_available})">
-                ${item.is_available ? 'Set Habis' : 'Tersedia'}
-              </button>
+              <span class="menu-cat-line">${item.category_name || ''}</span>
+              ${markedNote}
+              <div class="menu-btn-row">${restockBtn}${toggleBtn}</div>
             </div>
           </div>
         `;
@@ -1261,16 +1419,23 @@
       }
     }
 
-    async function toggleSoldOut(itemId, currentAvailable) {
+    // "Tandai Habis" / "Aktifkan Kembali": only for products that really have stock
+    async function toggleSoldOut(itemId) {
+      const p = productStock[itemId];
+      if (!p) return;
+      if (Number(p.stock) <= 0) {
+        showToast(`Stok ${p.name} sudah 0, gunakan Tambah Stok`);
+        return;
+      }
+      const activate = getStockStatus(p) === "habis"; // marked sold out (stock > 0) -> bring it back
       try {
         await api(`/api/products/${itemId}/availability`, {
           method: 'PATCH',
-          body: JSON.stringify({ is_available: currentAvailable ? 0 : 1 })
+          body: JSON.stringify({ is_available: activate ? 1 : 0 })
         });
-        showToast("Ketersediaan menu diperbarui");
-        fetchProducts();
-        fetchAlerts();
+        showToast(activate ? `${p.name} diaktifkan kembali` : `${p.name} ditandai habis`);
       } catch (e) {}
+      afterStockChange(); // re-sync with the server in both cases (the server may have refused)
     }
 
     // 4. Cart / Order Panel Logic
@@ -1430,7 +1595,8 @@
     }
 
     function addItemToOrder(item) {
-      if (item.stock <= 0 || !item.is_available) {
+      item = productStock[item.id] || item; // latest known stock
+      if (getStockStatus(item) === "habis") {
         showToast(`Menu ${item.name} sedang habis!`);
         return;
       }
@@ -1440,7 +1606,7 @@
         return;
       }
       if (qtyOfProduct(item.id) >= item.stock) {
-        showToast(`Batas stok tercapai (${item.stock})`);
+        showToast(`Stok ${item.name} tinggal ${item.stock}`);
         return;
       }
 
@@ -1473,7 +1639,7 @@
       } else {
         const p = productStock[it.product_id];
         if (delta > 0 && p && qtyOfProduct(it.product_id) + delta > p.stock) {
-          showToast(`Batas stok tercapai (${p.stock})`);
+          showToast(`Stok ${it.name} tinggal ${p.stock}`);
           return;
         }
         it.qty = newQty;
@@ -1603,7 +1769,7 @@
               <div class="qty-controls">
                 <button type="button" class="qty-btn" aria-label="Kurangi" onclick="changeItemQty(${it.uid}, -1)">−</button>
                 <span class="qty-val">${it.qty}</span>
-                <button type="button" class="qty-btn" aria-label="Tambah" onclick="changeItemQty(${it.uid}, 1)">+</button>
+                <button type="button" class="qty-btn ${(productStock[it.product_id] && qtyOfProduct(it.product_id) >= Number(productStock[it.product_id].stock)) ? "at-cap" : ""}" aria-label="Tambah" onclick="changeItemQty(${it.uid}, 1)">+</button>
               </div>
             </div>
           `;
@@ -1864,6 +2030,7 @@
         printReceipt(fullOrder, cashReceived, payRes.change);
 
         showToast(`Pembayaran #${fullOrder.order_no} berhasil!`);
+        notifyLowStock(payRes.low_stock);
         closePanelState();
 
         // Refresh live data
@@ -2017,7 +2184,7 @@
       tbody.innerHTML = "";
 
       if (!list || list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Belum ada data penjualan tercatat hari ini.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Belum ada data penjualan tercatat hari ini.</td></tr>`;
         return;
       }
 
@@ -2025,10 +2192,11 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><strong>#${idx + 1}</strong></td>
-          <td><strong>${item.name}</strong></td>
-          <td><span style="font-size:11px;color:var(--text-muted);">${item.category || ''}</span></td>
+          <td><strong>${esc(item.name)}</strong></td>
+          <td><span style="font-size:11px;color:var(--text-muted);">${esc(item.category || '')}</span></td>
           <td>${item.qty} Porsi</td>
           <td><strong>${formatRp(item.revenue)}</strong></td>
+          <td>${stockStatusBadge(item)} <span style="font-size:11px;color:var(--text-muted);">${Number(item.stock) || 0}</span></td>
         `;
         tbody.appendChild(tr);
       });
@@ -2253,6 +2421,299 @@
       });
     }
 
+    // ---------- STOCK MANAGEMENT (Tambah Stok, Koreksi, Kelola Stok) ----------
+    let currentTab = "meja";
+    let stockProducts = [];
+    let stockSummary = null;
+    let stockFilter = "semua";
+    let stockSearch = "";
+    let stockHistoryProductId = null;
+    let restockProductId = null;
+    let restockBusy = false;
+    let correctionProductId = null;
+    let correctionBusy = false;
+    const MAX_STOCK_INPUT = 100000;
+    const MOVEMENT_LABEL = { restock: "Restock", correction: "Koreksi", sale: "Penjualan", void_restore: "Void (stok kembali)" };
+
+    // Strict whole-number check: rejects empty, decimals, negatives and text with a clear message
+    function parseStockInput(raw, { min, label = "Jumlah", badInput = false }) {
+      const s = String(raw ?? "").trim();
+      if (badInput) return { error: `${label} harus berupa angka` };
+      if (s === "") return { error: `${label} wajib diisi` };
+      if (/^-/.test(s)) return { error: `${label} tidak boleh negatif` };
+      if (/[.,]/.test(s)) return { error: `${label} harus bilangan bulat, tanpa desimal` };
+      if (!/^\d+$/.test(s)) return { error: `${label} harus berupa angka` };
+      const n = parseInt(s, 10);
+      if (n < min) return { error: min === 1 ? `${label} minimal 1` : `${label} tidak boleh kurang dari ${min}` };
+      if (n > MAX_STOCK_INPUT) return { error: `${label} terlalu besar (maksimal ${MAX_STOCK_INPUT.toLocaleString("id-ID")})` };
+      return { value: n };
+    }
+
+    // Re-sync every place that shows stock (menu cards, bell, "Kelola Stok")
+    function afterStockChange() {
+      fetchProducts();
+      fetchAlerts();
+      if (currentTab === "stok") fetchStockView();
+    }
+
+    // Toast once per sale/correction for products that ended at or below their low-stock threshold
+    function notifyLowStock(list) {
+      (list || []).forEach(p => {
+        showToast(Number(p.stock) <= 0 ? `Stok ${p.name} habis` : `Stok ${p.name} menipis: ${p.stock}`);
+      });
+    }
+
+    // ---- Tambah Stok (restock) ----
+    function openRestockModal(productId) {
+      const p = productStock[productId];
+      if (!p) return;
+      restockProductId = productId;
+      restockBusy = false;
+      document.getElementById("btn-restock-save").disabled = false;
+      document.getElementById("restock-name").textContent = p.name;
+      document.getElementById("restock-current").textContent = p.stock;
+      document.getElementById("restock-qty").value = "";
+      document.getElementById("restock-note").value = "";
+      document.getElementById("restock-error").textContent = "";
+      updateRestockPreview();
+      openModal("modal-restock");
+      document.getElementById("restock-qty").focus();
+    }
+
+    // Updates the live preview; returns true when the quantity is valid
+    function updateRestockPreview(showEmptyError = false) {
+      const p = productStock[restockProductId];
+      if (!p) return false;
+      const input = document.getElementById("restock-qty");
+      const r = parseStockInput(input.value, { min: 1, badInput: input.validity && input.validity.badInput });
+      const errEl = document.getElementById("restock-error");
+      const preview = document.getElementById("restock-preview");
+      if (r.value !== undefined) {
+        preview.textContent = `Stok sekarang ${p.stock} → ${Number(p.stock) + r.value}`;
+        errEl.textContent = "";
+        return true;
+      }
+      preview.textContent = `Stok sekarang ${p.stock}`;
+      errEl.textContent = (input.value.trim() === "" && !showEmptyError) ? "" : r.error;
+      return false;
+    }
+
+    function addRestockChip(n) {
+      const input = document.getElementById("restock-qty");
+      const r = parseStockInput(input.value, { min: 1 });
+      input.value = Math.min((r.value || 0) + n, MAX_STOCK_INPUT);
+      updateRestockPreview();
+      input.focus();
+    }
+
+    async function submitRestock() {
+      if (restockBusy) return;
+      const p = productStock[restockProductId];
+      if (!p) return;
+      if (!updateRestockPreview(true)) {
+        showToast(document.getElementById("restock-error").textContent);
+        return;
+      }
+      const qty = parseInt(document.getElementById("restock-qty").value, 10);
+      const note = document.getElementById("restock-note").value.trim();
+
+      restockBusy = true;
+      const btn = document.getElementById("btn-restock-save");
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/products/${p.id}/stock`, {
+          method: 'POST',
+          body: JSON.stringify({ qty, note })
+        });
+        closeModal("modal-restock");
+        showToast(`Stok ${p.name} +${qty}, sekarang ${res.product.stock}`);
+        afterStockChange();
+      } catch (e) {
+        // api() already showed the error; keep the dialog open so the user can fix the input
+      } finally {
+        restockBusy = false;
+        btn.disabled = false;
+      }
+    }
+
+    // ---- Koreksi Stok (stock-taking, needs supervisor PIN + reason) ----
+    function openCorrectionModal(productId) {
+      const p = productStock[productId];
+      if (!p) return;
+      correctionProductId = productId;
+      correctionBusy = false;
+      document.getElementById("btn-correct-save").disabled = false;
+      document.getElementById("correct-name").textContent = p.name;
+      document.getElementById("correct-current").textContent = p.stock;
+      document.getElementById("correct-new").value = "";
+      document.getElementById("correct-reason").value = "";
+      document.getElementById("correct-error").textContent = "";
+      updateCorrectionPreview();
+      openModal("modal-correction");
+      document.getElementById("correct-new").focus();
+    }
+
+    function updateCorrectionPreview() {
+      const p = productStock[correctionProductId];
+      if (!p) return false;
+      const input = document.getElementById("correct-new");
+      const r = parseStockInput(input.value, { min: 0, label: "Stok", badInput: input.validity && input.validity.badInput });
+      const preview = document.getElementById("correct-preview");
+      if (r.value === undefined) {
+        preview.textContent = `Stok sekarang ${p.stock}`;
+        return false;
+      }
+      const diff = r.value - Number(p.stock);
+      preview.textContent = `Stok sekarang ${p.stock} → ${r.value} (selisih ${diff > 0 ? "+" : ""}${diff})`;
+      return true;
+    }
+
+    function submitCorrection() {
+      if (correctionBusy) return;
+      const p = productStock[correctionProductId];
+      if (!p) return;
+      const errEl = document.getElementById("correct-error");
+      const input = document.getElementById("correct-new");
+      const r = parseStockInput(input.value, { min: 0, label: "Stok", badInput: input.validity && input.validity.badInput });
+      const reason = document.getElementById("correct-reason").value.trim();
+
+      let error = r.error || "";
+      if (!error && r.value === Number(p.stock)) error = "Stok baru sama dengan stok saat ini";
+      if (!error && !reason) error = "Alasan koreksi wajib diisi";
+      errEl.textContent = error;
+      if (error) {
+        showToast(error);
+        return;
+      }
+
+      // Existing PIN flow: the supervisor modal verifies the PIN, the server verifies it again
+      requestSupervisorAuth(
+        `Koreksi stok ${p.name}: ${p.stock} → ${r.value}. Masukkan PIN Supervisor / Admin.`,
+        ({ pin }) => doCorrection(p, r.value, reason, pin)
+      );
+    }
+
+    async function doCorrection(p, newStock, reason, pin) {
+      if (correctionBusy) return;
+      correctionBusy = true;
+      const btn = document.getElementById("btn-correct-save");
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/products/${p.id}/stock/correct`, {
+          method: 'POST',
+          body: JSON.stringify({ new_stock: newStock, reason, pin })
+        });
+        closeModal("modal-correction");
+        showToast(`Stok ${p.name} dikoreksi: ${p.stock} → ${res.product.stock}`);
+        notifyLowStock(res.low_stock);
+        afterStockChange();
+      } catch (e) {
+        // PIN rejected / validation error: dialog stays open
+      } finally {
+        correctionBusy = false;
+        btn.disabled = false;
+      }
+    }
+
+    // ---- Kelola Stok view ----
+    async function fetchStockView() {
+      try {
+        const [list, summary] = await Promise.all([
+          api('/api/products'),
+          api('/api/products/stock-summary')
+        ]);
+        stockProducts = list;
+        list.forEach(p => { productStock[p.id] = p; });
+        stockSummary = summary;
+        renderStockView();
+        if (stockHistoryProductId) loadStockHistory(stockHistoryProductId);
+      } catch (e) {}
+    }
+
+    function setStockFilter(f) {
+      stockFilter = f;
+      renderStockView();
+    }
+
+    function handleStockSearch(v) {
+      stockSearch = v.trim().toLowerCase();
+      renderStockView();
+    }
+
+    function renderStockView() {
+      const line = document.getElementById("stock-summary-line");
+      if (stockSummary) {
+        const parts = [];
+        if (stockSummary.menipis > 0) parts.push(`${stockSummary.menipis} menu menipis`);
+        if (stockSummary.habis > 0) parts.push(`${stockSummary.habis} menu habis`);
+        line.textContent = parts.length ? parts.join(", ") : "Semua menu stoknya aman";
+        line.style.color = stockSummary.habis > 0 ? "var(--danger)" : (stockSummary.menipis > 0 ? "var(--warning)" : "var(--success)");
+      }
+
+      ["semua", "menipis", "habis"].forEach(f => {
+        document.getElementById(`sf-${f}`).classList.toggle("active", stockFilter === f);
+      });
+
+      const rows = stockProducts
+        .filter(p => (stockFilter === "semua" || getStockStatus(p) === stockFilter) &&
+                     (!stockSearch || p.name.toLowerCase().includes(stockSearch)))
+        .sort((a, b) => (Number(a.stock) - Number(b.stock)) || a.name.localeCompare(b.name)); // lowest stock first
+
+      const tbody = document.getElementById("stock-table-body");
+      tbody.innerHTML = "";
+      if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Tidak ada menu yang sesuai.</td></tr>`;
+        return;
+      }
+
+      rows.forEach(p => {
+        const tr = document.createElement("tr");
+        tr.className = `stock-row ${p.id === stockHistoryProductId ? "selected" : ""}`;
+        const marked = Number(p.stock) > 0 && getStockStatus(p) === "habis";
+        tr.innerHTML = `
+          <td><strong>${esc(p.name)}</strong></td>
+          <td><span style="font-size:11px;color:var(--text-muted);">${esc(p.category_name || "")}</span></td>
+          <td><strong>${p.stock}</strong></td>
+          <td>${stockStatusBadge(p)}${marked ? ` <span style="font-size:10px;color:var(--text-muted);">ditandai habis</span>` : ""}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openRestockModal(${p.id})">Tambah Stok</button>
+            <button class="btn btn-subtle btn-sm" onclick="event.stopPropagation(); openCorrectionModal(${p.id})">Koreksi</button>
+          </td>
+        `;
+        tr.onclick = () => loadStockHistory(p.id);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadStockHistory(productId) {
+      const changed = stockHistoryProductId !== productId;
+      stockHistoryProductId = productId;
+      if (changed) renderStockView(); // moves the row highlight
+      try {
+        const data = await api(`/api/products/${productId}/stock-movements?limit=20`);
+        document.getElementById("stock-history-card").style.display = "block";
+        document.getElementById("stock-history-title").textContent = `🕘 Riwayat Stok: ${data.product.name} (20 terakhir)`;
+        const tbody = document.getElementById("stock-history-body");
+        if (data.movements.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Belum ada riwayat stok untuk menu ini.</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = data.movements.map(m => {
+          const when = new Date(m.created_at).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+          const change = Number(m.qty_change);
+          return `
+            <tr>
+              <td>${when}</td>
+              <td>${MOVEMENT_LABEL[m.type] || esc(m.type)}</td>
+              <td class="${change >= 0 ? "mv-plus" : "mv-minus"}">${change > 0 ? "+" : ""}${change}</td>
+              <td>${m.stock_after}</td>
+              <td>${esc(m.note || (m.order_no ? m.order_no : "-"))}</td>
+              <td>${esc(m.user_name)}</td>
+            </tr>`;
+        }).join("");
+      } catch (e) {}
+    }
+
     // 11. Notifications
     function renderNotifications() {
       const container = document.getElementById("notif-list-container");
@@ -2296,7 +2757,12 @@
       const targetPane = document.getElementById(`tab-pane-${tabId}`);
       if (targetPane) targetPane.style.display = "flex";
 
+      currentTab = tabId;
       const btns = document.querySelectorAll(".tab-btn");
+      if (tabId === "stok") {
+        btns[4].classList.add("active");
+        fetchStockView();
+      }
       if (tabId === "meja") btns[0].classList.add("active");
       if (tabId === "menu") btns[1].classList.add("active");
       if (tabId === "laporan") {
