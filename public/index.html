@@ -190,18 +190,11 @@
         </div>
         <div style="margin-bottom: 16px;">
           <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Password</label>
-          <input type="password" id="login-password" required placeholder="Password default: admin123" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; outline: none;">
+          <input type="password" id="login-password" required placeholder="Password" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; outline: none;">
         </div>
         <div id="login-error-msg" style="color: var(--danger); font-size: 12px; margin-bottom: 12px; display: none;"></div>
         <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 10px;">Masuk ke Kasir</button>
       </form>
-      <div style="margin-top: 14px; font-size: 11px; color: var(--text-muted); background: var(--bg-subtle); padding: 8px; border-radius: 6px; line-height: 1.4;">
-        <strong>Akun Tersedia:</strong><br>
-        • Kasir: <code>budi</code> / <code>admin123</code><br>
-        • Kasir: <code>sari</code> / <code>admin123</code><br>
-        • Supervisor: <code>spv</code> / <code>admin123</code> (PIN: 1234)<br>
-        • Admin: <code>admin</code> / <code>admin123</code> (PIN: 1234)
-      </div>
     </div>
   </div>
 
@@ -466,7 +459,7 @@
       <div class="card-title" style="justify-content:center;margin-bottom:6px;">Otorisasi Supervisor</div>
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" id="pin-reason-text">Masukkan PIN supervisor untuk melanjutkan.</p>
       <input type="password" id="supervisor-pin-input" maxlength="4" style="letter-spacing:8px;text-align:center;font-size:24px;width:140px;padding:8px;border:2px solid var(--border);border-radius:8px;margin-bottom:14px;" placeholder="••••" onkeydown="if(event.key==='Enter') verifySupervisorPin()">
-      <div style="font-size:10px;color:var(--text-muted);margin-bottom:14px;">PIN default: 1234 (Supervisor / Admin)</div>
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:14px;">PIN Supervisor / Admin</div>
       <div style="display:flex;gap:8px;justify-content:center;">
         <button class="btn btn-subtle" onclick="closeModal('modal-supervisor-pin')">Batal</button>
         <button class="btn btn-primary" onclick="verifySupervisorPin()">Verifikasi</button>

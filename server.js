@@ -8,7 +8,14 @@ const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey_restoran_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET || JWT_SECRET.length < 32 || JWT_SECRET === 'change-this-secret') {
+  console.error('❌ JWT_SECRET belum diatur atau terlalu lemah (minimal 32 karakter).');
+  console.error('   Buat dengan: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
+  console.error('   lalu simpan di file .env sebagai JWT_SECRET=<hasilnya>');
+  process.exit(1);
+}
 
 app.use(cors());
 app.use(express.json());

@@ -60,15 +60,23 @@ Follow these steps to run the application for the first time:
 
 ---
 
-## Default Development Credentials
+## Credentials
 
-After running `npm run db:seed`:
-- **Kasir:** `budi` / `admin123`
-- **Kasir:** `sari` / `admin123`
-- **Supervisor:** `spv` / `admin123` (Supervisor PIN: `1234`)
-- **Admin:** `admin` / `admin123` (Admin PIN: `1234`)
+Usernames: `budi`, `sari` (kasir), `spv` (supervisor), `admin` (admin).
 
-> ⚠️ **Warning:** These credentials and PINs are intended strictly for local development and testing. Always change them before deploying to production.
+`npm run db:seed` generates a **random** password (all users) and a random 4-digit PIN (supervisor/admin) and prints them once in the console. To choose your own, set them before seeding:
+
+```powershell
+$env:SEED_PASSWORD = "your-strong-password"; $env:SEED_PIN = "4821"; npm run db:seed
+```
+
+### JWT secret
+
+The server refuses to start without a strong `JWT_SECRET` (min. 32 chars) in `.env`. Generate one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
 
 ---
 
