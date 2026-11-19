@@ -84,6 +84,17 @@ CREATE TABLE cash_movements (
   CONSTRAINT fk_cash_shift FOREIGN KEY (shift_id) REFERENCES shifts(id)
 ) ENGINE=InnoDB;
 
+-- ---------- PENGATURAN ----------
+
+-- Tarif pajak dan service untuk pesanan BARU (tiap pesanan menyimpan tarifnya sendiri di orders.tax_rate/service_rate)
+CREATE TABLE app_settings (
+  setting_key   VARCHAR(50)  NOT NULL PRIMARY KEY,
+  setting_value VARCHAR(255) NOT NULL,
+  updated_by    INT UNSIGNED NULL COMMENT 'admin yang terakhir mengubah',
+  updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_app_settings_user FOREIGN KEY (updated_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
 -- ---------- TRANSAKSI ----------
 
 CREATE TABLE orders (
@@ -99,7 +110,9 @@ CREATE TABLE orders (
   subtotal         DECIMAL(12,2) NOT NULL DEFAULT 0,
   discount_percent DECIMAL(5,2)  NOT NULL DEFAULT 0,
   discount_amount  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  tax_rate         DECIMAL(5,2)  NOT NULL DEFAULT 0 COMMENT 'pajak % yang dikunci saat pesanan dibuat',
   tax_amount       DECIMAL(12,2) NOT NULL DEFAULT 0,
+  service_rate     DECIMAL(5,2)  NOT NULL DEFAULT 0 COMMENT 'service % yang dikunci saat pesanan dibuat (0 bila bukan dine-in)',
   service_amount   DECIMAL(12,2) NOT NULL DEFAULT 0,
   total            DECIMAL(12,2) NOT NULL DEFAULT 0,
   authorized_by    INT UNSIGNED NULL COMMENT 'supervisor yang menyetujui void/diskon besar',
@@ -236,6 +249,10 @@ INSERT INTO restaurant_tables (id, code, capacity, area, status) VALUES
 (11, 'T11', 8, 'VIP',     'kosong'),
 (12, 'T12', 2, 'Outdoor', 'kosong');
 
+INSERT INTO app_settings (setting_key, setting_value) VALUES
+('tax_rate', '10'),
+('service_rate', '5');
+
 INSERT INTO payment_methods (id, name) VALUES
 (1, 'Tunai'), (2, 'QRIS'), (3, 'Kartu'), (4, 'E-wallet');
 
@@ -248,8 +265,8 @@ INSERT INTO cash_movements (shift_id, type, amount, reason) VALUES
 
 -- Order 1: selesai dibayar QRIS
 INSERT INTO orders (id, order_no, order_type, table_id, cashier_id, shift_id, status,
-                    subtotal, tax_amount, service_amount, total, closed_at)
-VALUES (1, 'INV-0001', 'dine_in', 2, 3, 1, 'selesai', 68000, 6800, 3400, 78200, NOW());
+                    subtotal, tax_rate, tax_amount, service_rate, service_amount, total, closed_at)
+VALUES (1, 'INV-0001', 'dine_in', 2, 3, 1, 'selesai', 68000, 10, 6800, 5, 3400, 78200, NOW());
 
 INSERT INTO order_items (order_id, product_id, product_name, price, qty) VALUES
 (1, 1, 'Nasi Goreng Spesial', 28000, 2),
@@ -260,8 +277,8 @@ INSERT INTO payments (order_id, payment_method_id, shift_id, amount, reference_n
 
 -- Order 2: dine-in aktif di T03, sedang diproses dapur
 INSERT INTO orders (id, order_no, order_type, table_id, cashier_id, shift_id, status,
-                    subtotal, tax_amount, service_amount, total)
-VALUES (2, 'INV-0002', 'dine_in', 3, 3, 1, 'diproses', 45000, 4500, 2250, 51750);
+                    subtotal, tax_rate, tax_amount, service_rate, service_amount, total)
+VALUES (2, 'INV-0002', 'dine_in', 3, 3, 1, 'diproses', 45000, 10, 4500, 5, 2250, 51750);
 
 INSERT INTO order_items (order_id, product_id, product_name, price, qty, note) VALUES
 (2, 3, 'Ayam Bakar Madu', 35000, 1, 'Tidak pedas'),
@@ -269,8 +286,8 @@ INSERT INTO order_items (order_id, product_id, product_name, price, qty, note) V
 
 -- Order 3: delivery GoFood, baru masuk
 INSERT INTO orders (id, order_no, order_type, platform, customer_name, cashier_id, shift_id, status,
-                    subtotal, tax_amount, service_amount, total)
-VALUES (3, 'INV-0003', 'delivery', 'gofood', 'Andi', 3, 1, 'baru', 52000, 5200, 0, 57200);
+                    subtotal, tax_rate, tax_amount, service_rate, service_amount, total)
+VALUES (3, 'INV-0003', 'delivery', 'gofood', 'Andi', 3, 1, 'baru', 52000, 10, 5200, 0, 0, 57200);
 
 INSERT INTO order_items (order_id, product_id, product_name, price, qty) VALUES
 (3, 2, 'Mie Goreng Seafood', 26000, 2);

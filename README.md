@@ -1,6 +1,6 @@
 # Kasir Restoran
 
-Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, meja, dan user, reservasi meja, dan laporan penjualan (per periode, dengan ekspor CSV).
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, meja, user, dan tarif pajak & service, reservasi meja, dan laporan penjualan (per periode, dengan ekspor CSV).
 
 **Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
@@ -301,6 +301,19 @@ Tombol **🔑** di pojok atas (untuk semua peran) membuka **Akun Saya**: ganti *
 
 > ⚠️ Fitur ini menambah kolom `session_version` pada tabel pengguna. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Semua akun, password, dan PIN tetap seperti semula, dan sesi yang sedang login tidak terputus.
 
+### Kelola Pajak & Service
+
+Tarif **pajak** (PB1, awalnya 10%) dan **service** (awalnya 5%) sekarang bisa diubah dari aplikasi, tanpa mengubah kode. Hanya **Admin** yang bisa mengubahnya: tombol **Atur** muncul di kartu **Pajak (…%) & Service (…%)** di bagian atas halaman (supervisor dan kasir hanya melihat tarifnya, dan server menolak permintaan ubah dari mereka).
+
+- **Isian:** pajak dan service dalam persen, 0 sampai 100, maksimal 2 angka di belakang koma (contoh: `7,5`). Isi **0** untuk mematikan; barisnya lalu tidak tampil di panel pesanan dan struk. Dialog menunjukkan contoh hitung untuk Rp 100.000 yang ikut berubah saat kamu mengetik, dan meminta konfirmasi dengan nilai lama → baru. Di dialog juga tertulis siapa yang terakhir mengubah dan kapan.
+- **Service hanya untuk dine-in**, seperti sebelumnya. Take-away dan delivery tidak dikenai service. Pajak berlaku untuk semua jenis pesanan, dihitung dari subtotal setelah diskon.
+- **Tarif dikunci per pesanan.** Tarif yang kamu simpan hanya berlaku untuk **pesanan baru**. Pesanan yang sedang terbuka atau di-hold tetap memakai tarif saat pesanan itu dibuat, sampai dibayar atau dibatalkan, jadi total yang sudah dilihat pelanggan tidak bergeser. Struk lama yang dicetak ulang dari **Riwayat Transaksi** juga tetap menampilkan persentase yang dulu dipakai.
+- **Kasir yang sedang menyusun pesanan baru** melihat tarif terbaru dalam sekitar 15 detik. Kalau tarif berubah tepat sebelum ia menekan bayar, pembayaran dihentikan dengan pemberitahuan total terbaru (pesanan tetap tersimpan), supaya ia tidak menagih angka yang salah.
+- **Laporan** tidak berubah: pajak dan service di laporan adalah jumlah nominal yang benar-benar dikenakan pada tiap nota.
+- Pembulatan ke rupiah terdekat (setengah naik). Untuk 10% dan 5% hasilnya sama persis dengan sebelumnya.
+
+> ⚠️ Fitur ini menambah tabel `app_settings` serta kolom `tax_rate` dan `service_rate` pada tabel pesanan. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Pesanan lama otomatis diisi 10% dan 5% (service 0% untuk take-away dan delivery), yaitu tarif yang selalu dipakai sebelumnya, jadi semua total dan struk lama tidak berubah. Menjalankan migrasi lagi tidak menimpa tarif yang sudah kamu ubah.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -323,7 +336,7 @@ Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan d
 
 ### Setelah `git pull` (memperbarui kode)
 
-> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada; tanpa kolom `session_version` pada pengguna, semua permintaan gagal).
+> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada; tanpa kolom `session_version` pada pengguna, semua permintaan gagal; tanpa tabel `app_settings` dan kolom tarif pada pesanan, pesanan baru tidak bisa dibuat).
 
 Urutan yang aman:
 
@@ -411,6 +424,9 @@ Password hasil `db:seed` hanya muncul sekali. Kalau ada admin yang masih bisa lo
 
 **Semua permintaan gagal atau muncul `Unknown column 'session_version'` setelah `git pull`**
 Database belum diperbarui. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data dan akun tidak berubah.
+
+**"Pengaturan pajak dan service belum lengkap" atau `Unknown column 'tax_rate'` saat membuat atau membayar pesanan**
+Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data tidak hilang.
 
 **Tiba-tiba keluar sendiri ("Sesi berakhir" atau "Akun tidak aktif")**
 Itu disengaja: password akunmu baru direset atau diganti, atau akunmu dinonaktifkan oleh admin. Login lagi dengan password yang baru, atau minta admin mengaktifkan akunmu di tab **Kelola User**.

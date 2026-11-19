@@ -23,21 +23,47 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- HELPER FUNCTIONS ----------
 
-// Recalculates order subtotal, discount, tax, service charge, and total
-function calculateOrderTotals(items, discountPercent = 0, orderType = 'dine_in') {
+// ---------- TAX & SERVICE ----------
+// The rates (percent) for NEW orders live in app_settings. Every order stores the pair it was created with
+// (orders.tax_rate / orders.service_rate) and is always calculated with its own pair, so changing the rates never moves
+// a bill a customer has already seen, and an old receipt keeps showing the percentages that were charged.
+
+// taxable x rate%, rounded to whole rupiah. The rate becomes whole hundredths of a percent first (7.5 -> 750), so the
+// product is exact. The browser (orderAmounts) uses the very same expression.
+function chargeAmount(taxable, ratePercent) {
+  return Math.round(taxable * Math.round(Number(ratePercent) * 100) / 10000);
+}
+
+// The pair an order of this type is charged: service only applies to dine-in
+function effectiveRates(orderType, settings) {
+  return { tax_rate: settings.tax_rate, service_rate: orderType === 'dine_in' ? settings.service_rate : 0 };
+}
+
+// The pair an existing order was created with
+function orderRates(order) {
+  return { tax_rate: Number(order.tax_rate), service_rate: Number(order.service_rate) };
+}
+
+// Recalculates order subtotal, discount, tax, service charge, and total. rates = { tax_rate, service_rate } (percent)
+function calculateOrderTotals(items, discountPercent = 0, rates) {
+  if (!rates || !Number.isFinite(rates.tax_rate) || !Number.isFinite(rates.service_rate)) {
+    throw new Error('Tarif pajak dan service pesanan tidak tersedia. Jalankan "npm run db:migrate".');
+  }
   const subtotal = items.reduce((sum, item) => sum + (Number(item.price) * Number(item.qty)), 0);
   const discPercent = Math.max(0, Math.min(100, Number(discountPercent) || 0));
   const discountAmount = Math.round((subtotal * discPercent) / 100);
   const taxable = Math.max(0, subtotal - discountAmount);
-  const taxAmount = Math.round(taxable * 0.10);
-  const serviceAmount = orderType === 'dine_in' ? Math.round(taxable * 0.05) : 0;
+  const taxAmount = chargeAmount(taxable, rates.tax_rate);
+  const serviceAmount = chargeAmount(taxable, rates.service_rate);
   const total = Math.round(taxable + taxAmount + serviceAmount);
 
   return {
     subtotal,
     discount_percent: discPercent,
     discount_amount: discountAmount,
+    tax_rate: rates.tax_rate,
     tax_amount: taxAmount,
+    service_rate: rates.service_rate,
     service_amount: serviceAmount,
     total
   };
@@ -1471,18 +1497,20 @@ app.post('/api/orders', async (req, res) => {
     }
     const shiftId = shifts[0].id;
 
-    // Snapshot products and calculate totals
+    // Snapshot products and calculate totals. The shared lock keeps an admin from changing the rates halfway through:
+    // this order gets one whole pair (old or new) and keeps it for its whole life.
     const orderItemsData = await buildOrderItems(conn, items);
+    const rates = effectiveRates(order_type, await loadChargeSettings(conn, ' FOR SHARE'));
 
-    const totals = calculateOrderTotals(orderItemsData, discount_percent, order_type);
+    const totals = calculateOrderTotals(orderItemsData, discount_percent, rates);
     const orderNo = await generateOrderNo(conn);
 
     const [orderResult] = await conn.query(`
       INSERT INTO orders (
         order_no, order_type, table_id, platform, customer_name,
         cashier_id, shift_id, status, subtotal, discount_percent,
-        discount_amount, tax_amount, service_amount, total, opened_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'baru', ?, ?, ?, ?, ?, ?, NOW())
+        discount_amount, tax_rate, tax_amount, service_rate, service_amount, total, opened_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'baru', ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `, [
       orderNo,
       order_type,
@@ -1494,7 +1522,9 @@ app.post('/api/orders', async (req, res) => {
       totals.subtotal,
       totals.discount_percent,
       totals.discount_amount,
+      totals.tax_rate,
       totals.tax_amount,
+      totals.service_rate,
       totals.service_amount,
       totals.total
     ]);
@@ -1526,7 +1556,7 @@ app.post('/api/orders', async (req, res) => {
     res.status(201).json(newOrder[0]);
   } catch (err) {
     await conn.rollback();
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     conn.release();
   }
@@ -1553,7 +1583,7 @@ app.put('/api/orders/:id', async (req, res) => {
 
     const orderItemsData = await buildOrderItems(conn, req.body.items, priceSnapshot);
     const discount = req.body.discount_percent !== undefined ? req.body.discount_percent : order.discount_percent;
-    const totals = calculateOrderTotals(orderItemsData, discount, order.order_type);
+    const totals = calculateOrderTotals(orderItemsData, discount, orderRates(order));
 
     await conn.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
     for (const it of orderItemsData) {
@@ -1621,7 +1651,7 @@ app.post('/api/orders/:id/items', async (req, res) => {
 
     // Recalculate totals
     const [allItems] = await conn.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
-    const totals = calculateOrderTotals(allItems, order.discount_percent, order.order_type);
+    const totals = calculateOrderTotals(allItems, order.discount_percent, orderRates(order));
 
     await conn.query(`
       UPDATE orders SET subtotal = ?, discount_amount = ?, tax_amount = ?, service_amount = ?, total = ?
@@ -1661,7 +1691,7 @@ app.patch('/api/orders/:id/items/:itemId', async (req, res) => {
 
     // Recalculate totals
     const [allItems] = await conn.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
-    const totals = calculateOrderTotals(allItems, order.discount_percent, order.order_type);
+    const totals = calculateOrderTotals(allItems, order.discount_percent, orderRates(order));
 
     await conn.query(`
       UPDATE orders SET subtotal = ?, discount_amount = ?, tax_amount = ?, service_amount = ?, total = ?
@@ -1763,7 +1793,7 @@ app.post('/api/orders/:id/pay', async (req, res) => {
     }
 
     // Server-side recalculation of totals
-    const totals = calculateOrderTotals(items, finalDiscountPercent, order.order_type);
+    const totals = calculateOrderTotals(items, finalDiscountPercent, orderRates(order));
 
     // Validate payments
     const totalPayment = payments.reduce((sum, p) => sum + Number(p.amount), 0);
@@ -2061,9 +2091,10 @@ const USER_ROLES = ['kasir', 'supervisor', 'admin'];
 const PIN_ROLES = ['supervisor', 'admin']; // only these roles have a PIN (it authorises discounts above 20% and voids)
 const BCRYPT_ROUNDS = 10;
 
-const requireOnlyAdmin = (req, res, next) => (req.user && req.user.role === 'admin')
+const onlyAdmin = (message) => (req, res, next) => (req.user && req.user.role === 'admin')
   ? next()
-  : res.status(403).json({ error: 'Hanya admin yang dapat mengelola user' });
+  : res.status(403).json({ error: message });
+const requireOnlyAdmin = onlyAdmin('Hanya admin yang dapat mengelola user');
 
 function parseUsername(value) {
   const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -2382,6 +2413,105 @@ app.patch('/api/admin/users/:id/active', requireOnlyAdmin, async (req, res) => {
     res.json({ ok: true, user });
   } catch (err) {
     sendUserError(res, err);
+  }
+});
+
+// ---------- KELOLA PAJAK & SERVICE ----------
+
+// A rate typed by an admin: a number, or text with a dot as the decimal point; 0-100 with at most 2 decimals
+function parseRate(value, label) {
+  if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+    throw new HttpError(400, `${label} wajib diisi`);
+  }
+  let n;
+  if (typeof value === 'number') n = value;
+  else if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())) n = Number(value.trim());
+  else throw new HttpError(400, `${label} harus berupa angka`);
+  if (!Number.isFinite(n)) throw new HttpError(400, `${label} harus berupa angka`);
+  if (n < 0 || n > 100) throw new HttpError(400, `${label} harus antara 0 dan 100`);
+  if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-7) throw new HttpError(400, `${label} maksimal 2 angka di belakang koma`);
+  return Math.round(n * 100) / 100;
+}
+
+// The tax / service rates for new orders. `lock` is ' FOR SHARE' (an order being created) or ' FOR UPDATE' (an admin
+// changing them): a fixed SQL suffix, never user input.
+async function loadChargeSettings(conn, lock = '') {
+  const incomplete = () => new HttpError(500, 'Pengaturan pajak dan service belum lengkap. Jalankan "npm run db:migrate".');
+  let rows;
+  try {
+    [rows] = await conn.query(
+      `SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('tax_rate', 'service_rate')${lock}`
+    );
+  } catch (err) {
+    if (err && err.code === 'ER_NO_SUCH_TABLE') throw incomplete();
+    throw err;
+  }
+  const out = {};
+  for (const r of rows) {
+    const n = Number(r.setting_value);
+    if (Number.isFinite(n) && n >= 0 && n <= 100) out[r.setting_key] = n;
+  }
+  if (out.tax_rate === undefined || out.service_rate === undefined) throw incomplete();
+  return out;
+}
+
+// What GET / PUT answer: both rates plus who changed them last and when (null while they never were changed)
+async function chargeSettingsView(conn) {
+  const rates = await loadChargeSettings(conn);
+  const [meta] = await conn.query(
+    `SELECT s.updated_at, u.name AS updated_by_name
+     FROM app_settings s JOIN users u ON u.id = s.updated_by
+     WHERE s.setting_key IN ('tax_rate', 'service_rate')
+     ORDER BY s.updated_at DESC LIMIT 1`
+  );
+  return {
+    tax_rate: rates.tax_rate,
+    service_rate: rates.service_rate,
+    updated_at: meta.length ? meta[0].updated_at : null,
+    updated_by_name: meta.length ? meta[0].updated_by_name : null
+  };
+}
+
+function sendChargeError(res, err) {
+  res.status(err.status || 500).json({ error: err.message });
+}
+
+// GET /api/settings/charges — every role (the cashier's order panel needs the rates)
+app.get('/api/settings/charges', async (req, res) => {
+  try {
+    res.json(await chargeSettingsView(db));
+  } catch (err) {
+    sendChargeError(res, err);
+  }
+});
+
+// PUT /api/admin/settings/charges { tax_rate, service_rate } — admin only. Applies to NEW orders; orders that already
+// exist keep the rates they were created with.
+app.put('/api/admin/settings/charges', onlyAdmin('Hanya admin yang dapat mengubah pajak dan service'), async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const body = req.body || {};
+    const next = {
+      tax_rate: parseRate(body.tax_rate, 'Pajak'),
+      service_rate: parseRate(body.service_rate, 'Service')
+    };
+
+    await conn.beginTransaction();
+    const cur = await loadChargeSettings(conn, ' FOR UPDATE');
+    for (const key of ['tax_rate', 'service_rate']) {
+      if (cur[key] !== next[key]) {
+        await conn.query('UPDATE app_settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?',
+          [String(next[key]), req.user.id, key]);
+      }
+    }
+    await conn.commit();
+
+    res.json({ ok: true, settings: await chargeSettingsView(db) });
+  } catch (err) {
+    await conn.rollback();
+    sendChargeError(res, err);
+  } finally {
+    conn.release();
   }
 });
 

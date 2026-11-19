@@ -350,7 +350,7 @@
       <div class="stat-meta">Rata-rata: <strong id="stat-avg">Rp 0</strong></div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Pajak (10%) & Service (5%)</div>
+      <div class="stat-label"><span id="stat-tax-service-label">Pajak &amp; Service</span><button class="btn btn-subtle btn-sm" id="btn-charges" style="display:none;padding:1px 6px;margin-left:6px;" onclick="openCharges()">Atur</button></div>
       <div class="stat-value" id="stat-tax-service">Rp 0</div>
       <div class="stat-meta">Total potongan diskon: <span id="stat-discount" style="color:var(--danger);">Rp 0</span></div>
     </div>
@@ -695,12 +695,12 @@
                 <span id="calc-discount" style="color:var(--danger);">- Rp 0</span>
               </div>
             </div>
-            <div class="calc-row">
-              <span>Pajak Resto (10%)</span>
+            <div class="calc-row" id="calc-tax-row">
+              <span id="calc-tax-label">Pajak Resto</span>
               <span id="calc-tax">Rp 0</span>
             </div>
-            <div class="calc-row">
-              <span>Service Charge (5%)</span>
+            <div class="calc-row" id="calc-service-row">
+              <span id="calc-service-label">Service Charge</span>
               <span id="calc-service">Rp 0</span>
             </div>
           </div>
@@ -1082,6 +1082,31 @@
     </div>
   </div>
 
+  <!-- MODAL: ATUR PAJAK & SERVICE (admin) -->
+  <div class="modal-overlay" id="modal-charges">
+    <div class="modal-card" style="max-width:400px;">
+      <div class="card-title" style="margin-bottom:2px;">💰 Pajak &amp; Service</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Berlaku untuk pesanan baru. Pesanan yang sedang terbuka atau di-hold tetap memakai tarif lamanya sampai dibayar atau dibatalkan.</div>
+
+      <label class="modal-field-label" for="ch-tax">Pajak (%)</label>
+      <input type="text" class="modal-input" id="ch-tax" inputmode="decimal" maxlength="6" autocomplete="off" oninput="updateChargesPreview()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitCharges();}">
+
+      <label class="modal-field-label" for="ch-service">Service (%), hanya untuk dine-in</label>
+      <input type="text" class="modal-input" id="ch-service" inputmode="decimal" maxlength="6" autocomplete="off" oninput="updateChargesPreview()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();submitCharges();}">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">0 sampai 100, maksimal 2 angka di belakang koma (cth: 7,5). Isi 0 untuk mematikan.</div>
+
+      <div id="ch-preview" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:10px;font-size:12px;"></div>
+      <div class="field-error" id="ch-error" role="alert"></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;" id="ch-meta"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+        <button class="btn btn-subtle btn-touch" onclick="closeModal('modal-charges')">Batal</button>
+        <button class="btn btn-primary btn-touch" id="ch-save" onclick="submitCharges()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: KONFIRMASI UMUM -->
   <div class="modal-overlay" id="modal-confirm">
     <div class="modal-card" style="max-width:380px;">
@@ -1262,6 +1287,40 @@
 
     let currentOrder = blankOrder();
 
+    // ---- Pajak & Service ----
+    // Rates (percent) for NEW orders, kept in sync with the server (fetchChargeRates). A saved order carries its own pair.
+    let chargeRates = { tax_rate: 10, service_rate: 5, updated_at: null, updated_by_name: null };
+
+    // Percent as people read it: 10 -> "10", 7.5 -> "7,5"
+    function formatRate(n) {
+      return String(Number(n)).replace(".", ",");
+    }
+
+    // taxable x rate%, rounded to whole rupiah: the very same expression as chargeAmount() in server.js
+    function chargeAmount(taxable, ratePercent) {
+      return Math.round(taxable * Math.round(Number(ratePercent) * 100) / 10000);
+    }
+
+    // The rates an order is charged: a saved order keeps the pair it was created with, a new one gets the current rates
+    // (service only for dine-in, like the server does)
+    function ratesOf(order) {
+      if (order.id && Number.isFinite(order.taxRate) && Number.isFinite(order.serviceRate)) {
+        return { tax: order.taxRate, service: order.serviceRate };
+      }
+      return { tax: chargeRates.tax_rate, service: order.type === "dine_in" ? chargeRates.service_rate : 0 };
+    }
+
+    // Every on-screen total comes from here (panel, change, quick cash, pay)
+    function orderAmounts(order) {
+      const subtotal = order.items.reduce((s, i) => s + (i.price * i.qty), 0);
+      const discountVal = Math.round((subtotal * (order.discountPercent || 0)) / 100);
+      const taxable = Math.max(0, subtotal - discountVal);
+      const rates = ratesOf(order);
+      const tax = chargeAmount(taxable, rates.tax);
+      const service = chargeAmount(taxable, rates.service);
+      return { subtotal, discountVal, taxable, tax, service, rates, grandTotal: taxable + tax + service };
+    }
+
     let pendingSupervisorAction = null;
     let selectedOrderTypeChoice = "dine_in";
     let selectedOrderTypeLabel = "Dine-in";
@@ -1426,7 +1485,8 @@
           fetchCurrentShift(),
           fetchAlerts(),
           fetchReservations(),
-          fetchRecentTransactions()
+          fetchRecentTransactions(),
+          fetchChargeRates()
         ]);
       } catch (e) {
         console.error("Error loading app data:", e);
@@ -1765,7 +1825,10 @@
           qty: Number(i.qty),
           note: i.note || ""
         })),
-        discountPercent: Number(ord.discount_percent) || 0
+        discountPercent: Number(ord.discount_percent) || 0,
+        // the rates this order was created with: they stay the same even if an admin changes the rates later
+        taxRate: Number(ord.tax_rate) || 0,
+        serviceRate: Number(ord.service_rate) || 0
       };
       o.baseSig = orderSignature(o);
       return o;
@@ -2277,18 +2340,18 @@
       }
 
       // Calculations
-      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
-      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
-      const taxable = Math.max(0, subtotal - discountVal);
-      const tax = Math.round(taxable * 0.10);
-      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
-      const grandTotal = taxable + tax + service;
+      const { subtotal, discountVal, tax, service, rates, grandTotal } = orderAmounts(currentOrder);
 
       document.getElementById("calc-subtotal").textContent = formatRp(subtotal);
       document.getElementById("calc-discount").textContent = `- ${formatRp(discountVal)}`;
       document.getElementById("calc-tax").textContent = formatRp(tax);
       document.getElementById("calc-service").textContent = formatRp(service);
       document.getElementById("calc-total").textContent = formatRp(grandTotal);
+      // labels follow this order's own rates; a row with a 0% rate is not shown
+      document.getElementById("calc-tax-label").textContent = `Pajak Resto (${formatRate(rates.tax)}%)`;
+      document.getElementById("calc-service-label").textContent = `Service Charge (${formatRate(rates.service)}%)`;
+      document.getElementById("calc-tax-row").style.display = rates.tax > 0 ? "" : "none";
+      document.getElementById("calc-service-row").style.display = rates.service > 0 ? "" : "none";
 
       document.getElementById("input-discount-percent").value = currentOrder.discountPercent || 0;
       document.getElementById("foot-disc-badge").textContent = currentOrder.discountPercent ? `(Diskon ${currentOrder.discountPercent}%)` : "";
@@ -2322,12 +2385,7 @@
 
     function calculateChange() {
       if (currentOrder.paymentMethod !== "Tunai") return;
-      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
-      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
-      const taxable = Math.max(0, subtotal - discountVal);
-      const tax = Math.round(taxable * 0.10);
-      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
-      const grandTotal = taxable + tax + service;
+      const { grandTotal } = orderAmounts(currentOrder);
 
       const received = parseFloat(document.getElementById("input-cash-received").value) || 0;
       const change = received - grandTotal;
@@ -2342,12 +2400,7 @@
     }
 
     function quickCash(opt) {
-      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
-      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
-      const taxable = Math.max(0, subtotal - discountVal);
-      const tax = Math.round(taxable * 0.10);
-      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
-      const grandTotal = taxable + tax + service;
+      const { grandTotal } = orderAmounts(currentOrder);
 
       const input = document.getElementById("input-cash-received");
       if (opt === "exact") {
@@ -2488,12 +2541,7 @@
         return false;
       }
 
-      const subtotal = currentOrder.items.reduce((s, i) => s + (i.price * i.qty), 0);
-      const discountVal = Math.round((subtotal * (currentOrder.discountPercent || 0)) / 100);
-      const taxable = Math.max(0, subtotal - discountVal);
-      const tax = Math.round(taxable * 0.10);
-      const service = currentOrder.type === 'dine_in' ? Math.round(taxable * 0.05) : 0;
-      const grandTotal = taxable + tax + service;
+      const { grandTotal } = orderAmounts(currentOrder);
 
       let cashReceived = grandTotal;
       if (currentOrder.paymentMethod === "Tunai") {
@@ -2508,6 +2556,16 @@
         // Make sure the server has exactly what is on screen (new order -> created, edits -> saved)
         const orderId = await syncOrderToServer();
         if (!orderId) return false;
+
+        // A new order is charged the rates the server holds at the moment it is saved. If an admin changed them since
+        // this screen drew its total, the bill is no longer the amount the cashier is about to collect: stop and show it.
+        const settled = orderAmounts(currentOrder).grandTotal;
+        if (settled !== grandTotal) {
+          fetchChargeRates();
+          renderOrderPanel();
+          showToast(`Tarif pajak/service baru saja berubah. Total sekarang ${formatRp(settled)}. Periksa lalu bayar lagi.`, 7000);
+          return false;
+        }
 
         const payPayload = {
           payments: [{
@@ -2574,8 +2632,8 @@
       document.getElementById("receipt-totals").innerHTML = `
         <div style="display:flex;justify-content:space-between;"><span>Subtotal:</span><span>${formatRp(order.subtotal)}</span></div>
         ${order.discount_amount ? `<div style="display:flex;justify-content:space-between;"><span>Diskon (${order.discount_percent}%):</span><span>-${formatRp(order.discount_amount)}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;"><span>PB1 (10%):</span><span>${formatRp(order.tax_amount)}</span></div>
-        <div style="display:flex;justify-content:space-between;"><span>Service (5%):</span><span>${formatRp(order.service_amount)}</span></div>
+        ${Number(order.tax_rate) > 0 || Number(order.tax_amount) > 0 ? `<div style="display:flex;justify-content:space-between;"><span>PB1 (${formatRate(order.tax_rate)}%):</span><span>${formatRp(order.tax_amount)}</span></div>` : ''}
+        ${Number(order.service_rate) > 0 || Number(order.service_amount) > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Service (${formatRate(order.service_rate)}%):</span><span>${formatRp(order.service_amount)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:12px;margin:4px 0;"><span>TOTAL:</span><span>${formatRp(order.total)}</span></div>
         ${method === 'Tunai' ? `
           <div style="display:flex;justify-content:space-between;"><span>Tunai Diterima:</span><span>${formatRp(cashReceived)}</span></div>
@@ -3771,6 +3829,7 @@
       if (tablesBtn) tablesBtn.style.display = canManageMenu() ? "" : "none";
       const usersBtn = document.getElementById("tab-btn-users"); // "Kelola User": admin only
       if (usersBtn) usersBtn.style.display = isAdminRole() ? "" : "none";
+      renderChargeLabels(); // "Atur" on the Pajak & Service card: admin only
       reportRange = null; // a new login always starts the report at today
       reportData = null;
       if (!canManageMenu() && currentTab === "kelolamenu") switchTab("meja");
@@ -4392,6 +4451,121 @@
       }
     }
 
+    // ---- Kelola Pajak & Service ----
+    let chargesBusy = false;
+
+    // Card label under "Total Penjualan": the CURRENT rates (the amounts below it are the sum of what was really charged)
+    function renderChargeLabels() {
+      const el = document.getElementById("stat-tax-service-label");
+      if (el) el.textContent = `Pajak (${formatRate(chargeRates.tax_rate)}%) & Service (${formatRate(chargeRates.service_rate)}%)`;
+      const btn = document.getElementById("btn-charges");
+      if (btn) btn.style.display = isAdminRole() ? "" : "none";
+    }
+
+    // Reads the current rates (also polled every 15 s). A new, unsaved order is re-drawn when they change.
+    async function fetchChargeRates() {
+      try {
+        const r = await api('/api/settings/charges');
+        const changed = r.tax_rate !== chargeRates.tax_rate || r.service_rate !== chargeRates.service_rate;
+        chargeRates = r;
+        renderChargeLabels();
+        if (changed && panelOpen && !currentOrder.id) renderOrderPanel();
+        if (document.getElementById("modal-charges").classList.contains("open")) renderChargesMeta();
+      } catch (e) {}
+    }
+
+    // "7,5" or "7.5" -> 7.5; null unless it is a rate the server accepts (0-100, at most 2 decimals)
+    function parseRateInput(raw) {
+      const s = String(raw == null ? "" : raw).trim().replace(",", ".");
+      if (!/^\d{1,3}(\.\d{1,2})?$/.test(s)) return null;
+      const n = Number(s);
+      return n >= 0 && n <= 100 ? n : null;
+    }
+
+    function renderChargesMeta() {
+      const el = document.getElementById("ch-meta");
+      if (!chargeRates.updated_by_name || !chargeRates.updated_at) {
+        el.textContent = "Belum pernah diubah dari aplikasi.";
+        return;
+      }
+      const when = new Date(chargeRates.updated_at).toLocaleString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      el.textContent = `Terakhir diubah oleh ${chargeRates.updated_by_name} pada ${when}.`;
+    }
+
+    // Live example for Rp 100.000 as a dine-in order, with the rates as typed
+    function updateChargesPreview() {
+      const box = document.getElementById("ch-preview");
+      const tax = parseRateInput(document.getElementById("ch-tax").value);
+      const service = parseRateInput(document.getElementById("ch-service").value);
+      if (tax === null || service === null) {
+        box.textContent = "Isi kedua tarif dengan angka 0 sampai 100 untuk melihat contoh hitungnya.";
+        return;
+      }
+      const t = chargeAmount(100000, tax);
+      const s = chargeAmount(100000, service);
+      const row = (label, value, bold) =>
+        `<div style="display:flex;justify-content:space-between;${bold ? "font-weight:700;border-top:1px solid var(--border);margin-top:3px;padding-top:3px;" : ""}"><span>${label}</span><span>${formatRp(value)}</span></div>`;
+      box.innerHTML =
+        `<div style="color:var(--text-muted);margin-bottom:3px;">Contoh pesanan dine-in Rp 100.000</div>` +
+        row("Subtotal", 100000) +
+        row(`Pajak (${formatRate(tax)}%)`, t) +
+        row(`Service (${formatRate(service)}%)`, s) +
+        row("Total", 100000 + t + s, true);
+    }
+
+    async function openCharges() {
+      if (!isAdminRole()) return;
+      await fetchChargeRates(); // the "lama" values in the confirmation must be what the server holds right now
+      document.getElementById("ch-error").textContent = "";
+      document.getElementById("ch-tax").value = formatRate(chargeRates.tax_rate);
+      document.getElementById("ch-service").value = formatRate(chargeRates.service_rate);
+      renderChargesMeta();
+      updateChargesPreview();
+      openModal("modal-charges");
+      document.getElementById("ch-tax").focus();
+      document.getElementById("ch-tax").select();
+    }
+
+    async function submitCharges() {
+      if (chargesBusy) return;
+      const errEl = document.getElementById("ch-error");
+      errEl.textContent = "";
+      const fail = (msg, field) => { errEl.textContent = msg; document.getElementById(field).focus(); };
+      const tax = parseRateInput(document.getElementById("ch-tax").value);
+      const service = parseRateInput(document.getElementById("ch-service").value);
+      if (tax === null) return fail("Pajak harus angka 0 sampai 100 dengan maksimal 2 angka di belakang koma", "ch-tax");
+      if (service === null) return fail("Service harus angka 0 sampai 100 dengan maksimal 2 angka di belakang koma", "ch-service");
+      if (tax === chargeRates.tax_rate && service === chargeRates.service_rate) {
+        closeModal("modal-charges");
+        showToast("Tarif tidak berubah");
+        return;
+      }
+
+      const ok = await askConfirm({
+        title: "Ubah pajak & service?",
+        message: `Pajak ${formatRate(chargeRates.tax_rate)}% → ${formatRate(tax)}%, Service ${formatRate(chargeRates.service_rate)}% → ${formatRate(service)}%. ` +
+          "Berlaku untuk pesanan baru; pesanan yang sedang terbuka atau di-hold tetap memakai tarif lamanya.",
+        okLabel: "Ubah Tarif"
+      });
+      if (!ok) return;
+
+      chargesBusy = true;
+      document.getElementById("ch-save").disabled = true;
+      try {
+        const res = await api('/api/admin/settings/charges', { method: 'PUT', body: JSON.stringify({ tax_rate: tax, service_rate: service }) });
+        chargeRates = res.settings;
+        renderChargeLabels();
+        if (panelOpen && !currentOrder.id) renderOrderPanel();
+        closeModal("modal-charges");
+        showToast(`Tarif disimpan: pajak ${formatRate(chargeRates.tax_rate)}%, service ${formatRate(chargeRates.service_rate)}%. Berlaku untuk pesanan baru.`, 5000);
+      } catch (e) {
+        errEl.textContent = e.message;
+      } finally {
+        chargesBusy = false;
+        document.getElementById("ch-save").disabled = false;
+      }
+    }
+
     // ---- Kelola User (admin) ----
     async function fetchUsersAdmin() {
       if (!isAdminRole()) return;
@@ -4766,6 +4940,7 @@
           fetchSummary();
           fetchAlerts();
           fetchReservations();
+          fetchChargeRates(); // a new order is always charged the current rates
           syncMe(); // follows role / name changes and ends this session if the account was deactivated
         }
       }, 15000);
