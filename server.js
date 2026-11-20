@@ -20,6 +20,7 @@ if (!JWT_SECRET || JWT_SECRET.length < 32 || JWT_SECRET === 'change-this-secret'
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/dapur', (req, res) => res.sendFile(path.join(__dirname, 'public', 'dapur.html')));
 
 // ---------- HELPER FUNCTIONS ----------
 
@@ -634,6 +635,7 @@ app.post('/api/login', async (req, res) => {
 
 // All subsequent /api routes require valid JWT
 app.use('/api', authMiddleware);
+app.use('/api', restrictKitchenRole); // the kitchen account (role dapur) gets the kitchen screen only
 
 // POST /api/verify-pin { pin }
 app.post('/api/verify-pin', async (req, res) => {
@@ -1595,6 +1597,7 @@ app.put('/api/orders/:id', requireOrderHandler, async (req, res) => {
     const discount = req.body.discount_percent !== undefined ? req.body.discount_percent : order.discount_percent;
     const totals = calculateOrderTotals(orderItemsData, discount, orderRates(order));
 
+    const sigBefore = await itemsSignature(conn, orderId);
     await conn.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
     for (const it of orderItemsData) {
       await conn.query(`
@@ -1602,6 +1605,7 @@ app.put('/api/orders/:id', requireOrderHandler, async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?)
       `, [orderId, it.product_id, it.product_name, it.price, it.qty, it.note]);
     }
+    await flagKitchenIfItemsChanged(conn, orderId, sigBefore); // saving the same items again must not alarm the kitchen
 
     await conn.query(`
       UPDATE orders SET subtotal = ?, discount_percent = ?, discount_amount = ?, tax_amount = ?, service_amount = ?, total = ?
@@ -1644,6 +1648,7 @@ app.post('/api/orders/:id/items', requireOrderHandler, async (req, res) => {
     }
 
     // Check if same item & note exists
+    const sigBefore = await itemsSignature(conn, orderId);
     const [existing] = await conn.query(
       'SELECT id, qty FROM order_items WHERE order_id = ? AND product_id = ? AND COALESCE(note, "") = COALESCE(?, "")',
       [orderId, product_id, note || '']
@@ -1658,6 +1663,7 @@ app.post('/api/orders/:id/items', requireOrderHandler, async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?)
       `, [orderId, prod.id, prod.name, prod.price, Number(qty), note || null]);
     }
+    await flagKitchenIfItemsChanged(conn, orderId, sigBefore);
 
     // Recalculate totals
     const [allItems] = await conn.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
@@ -1693,11 +1699,13 @@ app.patch('/api/orders/:id/items/:itemId', requireOrderHandler, async (req, res)
       throw new Error('Pesanan sudah selesai atau dibatalkan');
     }
 
+    const sigBefore = await itemsSignature(conn, orderId);
     if (qty <= 0) {
       await conn.query('DELETE FROM order_items WHERE id = ? AND order_id = ?', [itemId, orderId]);
     } else {
       await conn.query('UPDATE order_items SET qty = ? WHERE id = ? AND order_id = ?', [qty, itemId, orderId]);
     }
+    await flagKitchenIfItemsChanged(conn, orderId, sigBefore);
 
     // Recalculate totals
     const [allItems] = await conn.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
@@ -1744,6 +1752,13 @@ app.patch('/api/orders/:id/status', requireOrderHandler, async (req, res) => {
     }
 
     await db.query('UPDATE orders SET status = ? WHERE id = ?', [status, id]);
+    // The cashier's list and the kitchen screen stay in step: "Dapur" starts the ticket, "Siap Saji" finishes it
+    // (a pending DIUBAH mark is dropped, the cashier has taken it over). Other statuses do not touch the kitchen.
+    if (status === 'diproses') {
+      await db.query("UPDATE orders SET kitchen_status = 'diproses', kitchen_status_at = NOW() WHERE id = ? AND kitchen_status = 'baru'", [id]);
+    } else if (status === 'siap_saji') {
+      await db.query("UPDATE orders SET kitchen_status = 'siap', kitchen_status_at = NOW(), kitchen_alert = NULL WHERE id = ? AND kitchen_status IN ('baru', 'diproses')", [id]);
+    }
     res.json({ ok: true, id: Number(id), status });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1920,15 +1935,199 @@ app.post('/api/orders/:id/void', async (req, res) => {
       await conn.query('UPDATE restaurant_tables SET status = "kosong" WHERE id = ?', [order.table_id]);
     }
 
+    // A ticket the kitchen may be working on is marked DIBATALKAN until they acknowledge it (a held order was never shown)
+    const kitchenAlert = (order.status !== 'hold' && ['baru', 'diproses'].includes(order.kitchen_status)) ? 'dibatalkan' : null;
     await conn.query(`
-      UPDATE orders SET status = 'void', void_reason = ?, authorized_by = ? WHERE id = ?
-    `, [reason || 'Dibatalkan oleh kasir/supervisor', authorizedBy, orderId]);
+      UPDATE orders SET status = 'void', void_reason = ?, authorized_by = ?, kitchen_alert = ? WHERE id = ?
+    `, [reason || 'Dibatalkan oleh kasir/supervisor', authorizedBy, kitchenAlert, orderId]);
 
     await conn.commit();
     res.json({ ok: true, message: 'Pesanan berhasil dibatalkan (void)' });
   } catch (err) {
     await conn.rollback();
     res.status(400).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// ---------- LAYAR DAPUR ----------
+
+const KITCHEN_ROLE = 'dapur';
+const KITCHEN_WINDOW_HOURS = 12;   // a ticket older than this never shows (an order nobody closed must not pile up)
+const KITCHEN_READY_MINUTES = 15;  // how long a finished ticket stays in the "Baru siap" strip, where it can be taken back
+const KITCHEN_WARN_MINUTES = 10;   // the ticket timer turns yellow ...
+const KITCHEN_LATE_MINUTES = 20;   // ... and red
+const KITCHEN_TRANSITIONS = { baru: ['diproses', 'siap'], diproses: ['siap'], siap: ['diproses'] };
+
+// The kitchen account may only open the kitchen screen. Runs after authentication, so req.user.role comes from the database.
+const KITCHEN_ALLOWED = [
+  ['GET', /^\/me$/],
+  ['POST', /^\/me\/password$/],
+  ['GET', /^\/kitchen\/orders$/],
+  ['PATCH', /^\/kitchen\/orders\/\d+$/],
+  ['POST', /^\/kitchen\/orders\/\d+\/ack$/]
+];
+function restrictKitchenRole(req, res, next) {
+  if (!req.user || req.user.role !== KITCHEN_ROLE) return next();
+  if (KITCHEN_ALLOWED.some(([method, re]) => method === req.method && re.test(req.path))) return next();
+  res.status(403).json({ error: 'Akun dapur hanya dapat memakai layar dapur' });
+}
+const requireKitchenRole = (req, res, next) => (req.user && req.user.role === KITCHEN_ROLE)
+  ? next()
+  : res.status(403).json({ error: 'Hanya akun dapur yang dapat mengubah status di layar dapur' });
+
+// What an order's items look like, to tell a real change from saving the same items again
+async function itemsSignature(conn, orderId) {
+  const [rows] = await conn.query(
+    "SELECT product_id, qty, COALESCE(note, '') AS note FROM order_items WHERE order_id = ? ORDER BY product_id, note, qty",
+    [orderId]
+  );
+  return JSON.stringify(rows.map(r => [r.product_id, Number(r.qty), r.note]));
+}
+
+// The items of an order really changed: if the kitchen already started it (or finished it) they must notice. An order they
+// have not started ('baru') just shows the new items. A finished ticket goes back to 'diproses' because there is something
+// new to cook. MySQL runs the assignments left to right, so every CASE below still sees the OLD kitchen_status.
+async function flagKitchenIfItemsChanged(conn, orderId, sigBefore) {
+  if (sigBefore === await itemsSignature(conn, orderId)) return;
+  await conn.query(`
+    UPDATE orders SET
+      kitchen_alert = CASE WHEN kitchen_status IN ('diproses', 'siap') THEN 'diubah' ELSE kitchen_alert END,
+      kitchen_status_at = CASE WHEN kitchen_status = 'siap' THEN NOW() ELSE kitchen_status_at END,
+      kitchen_status = CASE WHEN kitchen_status = 'siap' THEN 'diproses' ELSE kitchen_status END
+    WHERE id = ? AND status <> 'void'
+  `, [orderId]);
+}
+
+// GET /api/kitchen/orders — every role may look; nothing about money is in the answer
+app.get('/api/kitchen/orders', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT o.id, o.order_no, o.order_type, o.platform, o.customer_name, o.kitchen_status, o.kitchen_alert,
+             t.code AS table_code, DATE_FORMAT(o.opened_at, '%H:%i') AS opened_hhmm,
+             TIMESTAMPDIFF(SECOND, o.opened_at, NOW()) AS age_seconds,
+             TIMESTAMPDIFF(SECOND, o.kitchen_status_at, NOW()) AS status_age_seconds
+      FROM orders o
+      LEFT JOIN restaurant_tables t ON t.id = o.table_id
+      WHERE o.opened_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        AND (
+          (o.status NOT IN ('hold', 'void') AND o.kitchen_status IN ('baru', 'diproses'))
+          OR (o.status = 'void' AND o.kitchen_alert = 'dibatalkan')
+          OR (o.status <> 'void' AND o.kitchen_status = 'siap' AND o.kitchen_status_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE))
+        )
+      ORDER BY o.opened_at ASC, o.id ASC
+    `, [KITCHEN_WINDOW_HOURS, KITCHEN_READY_MINUTES]);
+
+    const itemsByOrder = new Map();
+    if (rows.length > 0) {
+      const [items] = await db.query(
+        'SELECT order_id, product_name, qty, note FROM order_items WHERE order_id IN (?) ORDER BY id ASC',
+        [rows.map(r => r.id)]
+      );
+      for (const it of items) {
+        if (!itemsByOrder.has(it.order_id)) itemsByOrder.set(it.order_id, []);
+        itemsByOrder.get(it.order_id).push({ name: it.product_name, qty: Number(it.qty), note: it.note || null });
+      }
+    }
+
+    const tickets = rows.map(r => ({
+      id: r.id,
+      order_no: r.order_no,
+      order_type: r.order_type,
+      platform: r.platform,
+      customer_name: r.customer_name,
+      table_code: r.table_code,
+      kitchen_status: r.kitchen_status,
+      alert: r.kitchen_alert,
+      opened_hhmm: r.opened_hhmm,
+      age_seconds: Number(r.age_seconds),
+      status_age_seconds: r.status_age_seconds === null ? null : Number(r.status_age_seconds),
+      items: itemsByOrder.get(r.id) || []
+    }));
+
+    res.json({
+      queue: tickets.filter(t => t.kitchen_status !== 'siap' || t.alert === 'dibatalkan'),
+      ready: tickets.filter(t => t.kitchen_status === 'siap' && t.alert !== 'dibatalkan')
+        .sort((a, b) => (a.status_age_seconds ?? 0) - (b.status_age_seconds ?? 0)),
+      config: {
+        warn_minutes: KITCHEN_WARN_MINUTES,
+        late_minutes: KITCHEN_LATE_MINUTES,
+        ready_minutes: KITCHEN_READY_MINUTES
+      },
+      can_update: req.user.role === KITCHEN_ROLE
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/kitchen/orders/:id { kitchen_status: 'diproses' | 'siap' } — only the kitchen account
+// baru -> diproses (Mulai Masak), baru/diproses -> siap (Siap Saji), siap -> diproses (Batalkan, within the ready window).
+// The cashier's own status follows only where it makes sense; belum_dibayar, selesai and hold are never touched.
+app.patch('/api/kitchen/orders/:id', requireKitchenRole, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const target = req.body && req.body.kitchen_status;
+    if (!['diproses', 'siap'].includes(target)) throw new HttpError(400, 'Status dapur harus diproses atau siap');
+    const id = Number(req.params.id);
+
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      'SELECT id, status, kitchen_status, TIMESTAMPDIFF(MINUTE, kitchen_status_at, NOW()) AS since_minutes FROM orders WHERE id = ? FOR UPDATE',
+      [id]
+    );
+    if (rows.length === 0) throw new HttpError(404, 'Pesanan tidak ditemukan');
+    const o = rows[0];
+    if (o.status === 'void') throw new HttpError(409, 'Pesanan sudah dibatalkan');
+    if (o.status === 'hold') throw new HttpError(409, 'Pesanan sedang di-hold dan belum masuk ke dapur');
+
+    if (o.kitchen_status === target) {
+      await conn.commit();
+      return res.json({ ok: true, id, kitchen_status: target, changed: false });
+    }
+    if (!KITCHEN_TRANSITIONS[o.kitchen_status].includes(target)) {
+      throw new HttpError(409, 'Perpindahan status dapur ini tidak diizinkan');
+    }
+    if (o.kitchen_status === 'siap' && !(o.since_minutes !== null && Number(o.since_minutes) <= KITCHEN_READY_MINUTES)) {
+      throw new HttpError(409, 'Batas waktu untuk membatalkan Siap Saji sudah lewat');
+    }
+
+    await conn.query('UPDATE orders SET kitchen_status = ?, kitchen_status_at = NOW(), kitchen_alert = NULL WHERE id = ?', [target, id]);
+    if (target === 'diproses') {
+      await conn.query("UPDATE orders SET status = 'diproses' WHERE id = ? AND status IN ('baru', 'siap_saji')", [id]);
+    } else {
+      await conn.query("UPDATE orders SET status = 'siap_saji' WHERE id = ? AND status IN ('baru', 'diproses')", [id]);
+    }
+    await conn.commit();
+    res.json({ ok: true, id, kitchen_status: target, changed: true });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/kitchen/orders/:id/ack — "Sudah dilihat": clears DIUBAH, and closes a DIBATALKAN ticket
+app.post('/api/kitchen/orders/:id/ack', requireKitchenRole, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const id = Number(req.params.id);
+    await conn.beginTransaction();
+    const [rows] = await conn.query('SELECT id, kitchen_alert FROM orders WHERE id = ? FOR UPDATE', [id]);
+    if (rows.length === 0) throw new HttpError(404, 'Pesanan tidak ditemukan');
+    const alert = rows[0].kitchen_alert;
+    if (alert === 'dibatalkan') {
+      await conn.query("UPDATE orders SET kitchen_alert = NULL, kitchen_status = 'siap', kitchen_status_at = NOW() WHERE id = ?", [id]);
+    } else if (alert === 'diubah') {
+      await conn.query('UPDATE orders SET kitchen_alert = NULL WHERE id = ?', [id]);
+    }
+    await conn.commit();
+    res.json({ ok: true, id, changed: !!alert });
+  } catch (err) {
+    await conn.rollback();
+    res.status(err.status || 500).json({ error: err.message });
   } finally {
     conn.release();
   }
@@ -2101,8 +2300,9 @@ app.post('/api/shifts/close', requireOrderHandler, async (req, res) => {
 
 // ---------- USER MANAGEMENT ----------
 
-const USER_ROLES = ['kasir', 'supervisor', 'admin'];
+const USER_ROLES = ['kasir', 'supervisor', 'admin', 'dapur'];
 const PIN_ROLES = ['supervisor', 'admin']; // only these roles have a PIN (it authorises discounts above 20% and voids)
+const noPinMessage = (role) => (role === 'dapur' ? 'Akun dapur tidak memiliki PIN' : 'Kasir tidak memiliki PIN');
 const BCRYPT_ROUNDS = 10;
 
 const onlyAdmin = (message) => (req, res, next) => (req.user && req.user.role === 'admin')
@@ -2137,13 +2337,13 @@ function parseUserInput(body, { creating }) {
   if (!name) throw new HttpError(400, 'Nama wajib diisi');
   if (name.length > 100) throw new HttpError(400, 'Nama maksimal 100 karakter');
   const username = parseUsername(b.username);
-  if (!USER_ROLES.includes(b.role)) throw new HttpError(400, 'Peran harus kasir, supervisor, atau admin');
+  if (!USER_ROLES.includes(b.role)) throw new HttpError(400, 'Peran harus kasir, supervisor, admin, atau dapur');
 
   const out = { name, username, role: b.role };
   if (creating) out.password = parsePassword(b.password);
   const hasPin = b.pin !== undefined && b.pin !== null && b.pin !== '';
   if (hasPin) {
-    if (b.role === 'kasir') throw new HttpError(400, 'Kasir tidak memiliki PIN');
+    if (!PIN_ROLES.includes(b.role)) throw new HttpError(400, noPinMessage(b.role));
     out.pin = parsePin(b.pin);
   } else if (creating && PIN_ROLES.includes(b.role)) {
     throw new HttpError(400, 'PIN 4 digit wajib untuk supervisor dan admin');
@@ -2269,7 +2469,7 @@ app.post('/api/me/password', async (req, res) => {
 // POST /api/me/pin { current_password, pin } -> supervisor / admin only; sessions stay valid
 app.post('/api/me/pin', async (req, res) => {
   try {
-    if (!PIN_ROLES.includes(req.user.role)) throw new HttpError(403, 'Kasir tidak memiliki PIN');
+    if (!PIN_ROLES.includes(req.user.role)) throw new HttpError(403, noPinMessage(req.user.role));
     const { current_password, pin } = req.body || {};
     const newPin = parsePin(pin);
     await verifyOwnPassword(req.user.id, current_password);
@@ -2338,7 +2538,7 @@ app.put('/api/admin/users/:id', requireOnlyAdmin, async (req, res) => {
 
       let pinHash = cur.pin_hash;
       if (!PIN_ROLES.includes(input.role)) {
-        pinHash = null; // kasir has no PIN
+        pinHash = null; // kasir and dapur have no PIN
       } else if (!PIN_ROLES.includes(cur.role) && !input.pin) {
         throw new HttpError(400, 'PIN 4 digit wajib saat menjadikan user supervisor atau admin');
       }
@@ -2382,7 +2582,7 @@ app.put('/api/admin/users/:id/pin', requireOnlyAdmin, async (req, res) => {
     const id = Number(req.params.id);
     const [found] = await db.query('SELECT id, role FROM users WHERE id = ?', [id]);
     if (found.length === 0) throw new HttpError(404, 'User tidak ditemukan');
-    if (!PIN_ROLES.includes(found[0].role)) throw new HttpError(400, 'Kasir tidak memiliki PIN');
+    if (!PIN_ROLES.includes(found[0].role)) throw new HttpError(400, noPinMessage(found[0].role));
     await withPinLock(async () => {
       await assertPinUnique(pin, id);
       await db.query('UPDATE users SET pin_hash = ? WHERE id = ?', [await bcrypt.hash(pin, BCRYPT_ROUNDS), id]);

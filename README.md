@@ -1,6 +1,6 @@
 # Kasir Restoran
 
-Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, meja, user, dan tarif pajak & service, reservasi meja, dan laporan penjualan (per periode, dengan ekspor CSV).
+Aplikasi kasir (POS) restoran berbasis web: login per peran, pesanan meja, pembayaran, diskon dengan otorisasi PIN supervisor, shift kasir, kelola stok, menu, meja, user, dan tarif pajak & service, reservasi meja, layar dapur, dan laporan penjualan (per periode, dengan ekspor CSV).
 
 **Teknologi:** Node.js + Express (backend), MySQL 8 yang berjalan di Docker (database), HTML/CSS/JS biasa (frontend, ada di `public/index.html`).
 
@@ -182,6 +182,7 @@ Admin dan supervisor melihat lencana **Mode Admin (hanya lihat)** di bagian atas
   ```sql
   UPDATE shifts SET status='closed', closed_at=NOW() WHERE cashier_id = <id admin> AND status='open';
   ```
+- **Akun Dapur** tidak menangani pesanan sama sekali: ia hanya memakai [Layar Dapur](#layar-dapur).
 - **Reservasi** tetap bisa dicatat dan diubah semua peran, tetapi tombol **Tamu Datang** dan **Buka Pesanan** (yang membuka pesanan baru) hanya muncul untuk kasir.
 - **Mengizinkan supervisor ikut menangani pesanan** nanti cukup mengubah dua tempat: `ORDER_HANDLER_ROLES` di `server.js` dan fungsi `canHandleOrders()` di `public/index.html`.
 
@@ -305,8 +306,8 @@ Tab **👥 Kelola User** hanya muncul untuk **Admin** (supervisor dan kasir tida
 
 | Aksi | Hasilnya |
 |---|---|
-| **+ Tambah User** | Isi nama, username, peran, dan password awal. Supervisor dan admin **wajib** diberi PIN 4 digit; kasir tidak punya PIN. |
-| **Ubah** | Mengubah nama, username, dan peran. Kasir → supervisor/admin wajib mengisi PIN; menjadi kasir menghapus PIN. |
+| **+ Tambah User** | Isi nama, username, peran (Kasir, Supervisor, Admin, atau **Dapur**), dan password awal. Supervisor dan admin **wajib** diberi PIN 4 digit; kasir dan dapur tidak punya PIN. |
+| **Ubah** | Mengubah nama, username, dan peran. Kasir atau dapur → supervisor/admin wajib mengisi PIN; menjadi kasir atau dapur menghapus PIN. |
 | **Password** | Reset password user lain. Semua sesi login user itu berakhir seketika. |
 | **PIN** | Mengatur PIN supervisor/admin. PIN tidak boleh sama dengan PIN supervisor atau admin aktif lain, karena PIN dipakai untuk mencatat siapa yang menyetujui diskon besar dan void. |
 | **Nonaktifkan / Aktifkan** | Akun nonaktif tidak bisa login dan sesinya berakhir seketika. Akun tidak dihapus, jadi riwayat pesanan dan shiftnya tetap utuh. |
@@ -337,6 +338,28 @@ Tarif **pajak** (PB1, awalnya 10%) dan **service** (awalnya 5%) sekarang bisa di
 
 > ⚠️ Fitur ini menambah tabel `app_settings` serta kolom `tax_rate` dan `service_rate` pada tabel pesanan. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Pesanan lama otomatis diisi 10% dan 5% (service 0% untuk take-away dan delivery), yaitu tarif yang selalu dipakai sebelumnya, jadi semua total dan struk lama tidak berubah. Menjalankan migrasi lagi tidak menimpa tarif yang sudah kamu ubah.
 
+### Layar Dapur
+
+Layar khusus untuk perangkat dapur (tablet atau monitor) di alamat **`/dapur`** (contoh: `http://localhost:3000/dapur`). Pakai **akun dengan peran Dapur**: admin membuatnya di tab **👥 Kelola User** (peran **Dapur**, tanpa PIN dan tanpa shift). Akun ini tidak melihat aplikasi kasir: kalau login di halaman kasir ia langsung dialihkan ke layar dapur, dan **semua permintaan lain ditolak server** (laporan, pesanan, data penjualan, dan seterusnya). Layar dapur belum punya tombol ganti password; admin mereset passwordnya lewat **Kelola User** bila perlu.
+
+| Yang tampil | Keterangan |
+|---|---|
+| **Tiket pesanan** | Pesanan paling lama di atas. Isinya nomor pesanan, meja atau jenis (Dine-in, Take Away, GoFood, GrabFood), item × jumlah, **catatan item** yang mencolok, dan jam masuk. Tanpa harga atau tombol bayar. |
+| **Pewaktu** | Hijau, **kuning setelah 10 menit**, **merah setelah 20 menit** sejak pesanan masuk. |
+| **Mulai Masak → Siap Saji** | Dua tombol besar yang mudah disentuh. Status "Dapur" dan "Siap Saji" di daftar Pesanan Aktif milik kasir ikut berubah. Sebaliknya, kalau kasir mengubah statusnya lewat daftar itu, tiket dapur menyesuaikan. |
+| **✓ Baru siap** | Tiket yang baru ditandai siap tetap terlihat **15 menit** di bagian bawah dengan tombol **Batalkan** (kalau salah tekan). |
+| **⚠ DIUBAH** | Muncul bila kasir mengubah isi pesanan (item, jumlah, atau catatan) setelah **Mulai Masak**. Pesanan yang sudah siap dan ketambahan item kembali ke antrean. Hilang setelah dapur menekan **Sudah dilihat**. Menyimpan ulang pesanan tanpa perubahan tidak menandai apa pun. |
+| **⛔ DIBATALKAN** | Muncul bila pesanan di-void: jangan dimasak. Hilang setelah dapur menekan **Mengerti**. |
+| **Bunyi** | Satu nada untuk pesanan baru, nada mendesak untuk DIUBAH atau DIBATALKAN. Browser baru mengizinkan bunyi setelah layar diketuk sekali. Tombol **Suara** mematikannya. |
+
+- Layar diperbarui sendiri tiap 5 detik. Tombol **⛶** untuk layar penuh, dan layar dijaga tetap menyala bila browser mendukungnya.
+- **Pesanan yang dibayar di muka** (take-away, delivery) tetap tampil di dapur sampai ditandai siap. Status dapur berjalan terpisah dari status pembayaran.
+- Pesanan **Hold** tidak tampil. Tiket yang dibuka lebih dari **12 jam** lalu tidak tampil, supaya pesanan lama yang tak pernah ditutup tidak menumpuk.
+- **Admin, supervisor, dan kasir** juga bisa membuka `/dapur` (dengan tombol **← Kasir** untuk kembali), tetapi hanya untuk **melihat**: tidak ada tombol ubah dan server menolak perubahan dari mereka.
+- Batas pewaktu (10 dan 20 menit), jendela 12 jam, dan 15 menit "Baru siap" tetap; mengubahnya cukup di bagian `LAYAR DAPUR` di `server.js`. Belum ada layar pengaturannya.
+
+> ⚠️ Fitur ini menambah peran `dapur` pada tabel pengguna serta kolom `kitchen_status`, `kitchen_status_at`, dan `kitchen_alert` pada tabel pesanan. **Jalankan `npm run db:migrate`** pada database yang sudah ada. Pesanan lama diisi sebagai selesai di dapur (kecuali yang masih Baru atau Dapur), jadi riwayat lama tidak muncul di layar. Menjalankan migrasi lagi tidak menimpa status dapur yang sudah ada.
+
 ---
 
 ## 4. Menjalankan Lagi di Hari Berikutnya
@@ -359,7 +382,7 @@ Untuk berhenti: `Ctrl + C` pada server, lalu `npm run db:down` untuk mematikan d
 
 ### Setelah `git pull` (memperbarui kode)
 
-> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada; tanpa kolom `session_version` pada pengguna, semua permintaan gagal; tanpa tabel `app_settings` dan kolom tarif pada pesanan, pesanan baru tidak bisa dibuat).
+> ⚠️ **Wajib jalankan `npm run db:migrate` setelah `git pull`.** Versi baru bisa menambah tabel database. Kalau langkah ini dilewati, sebagian fitur akan error (misalnya pembayaran dan void gagal karena tabel `stock_movements` belum ada, atau denah meja gagal dimuat karena tabel `reservations` atau kolom `is_active` pada meja belum ada; tanpa kolom `session_version` pada pengguna, semua permintaan gagal; tanpa tabel `app_settings` dan kolom tarif pada pesanan, pesanan baru tidak bisa dibuat; tanpa kolom `kitchen_status` pada pesanan, pembuatan dan perubahan pesanan serta layar dapur gagal).
 
 Urutan yang aman:
 
@@ -447,6 +470,12 @@ Password hasil `db:seed` hanya muncul sekali. Kalau ada admin yang masih bisa lo
 
 **Semua permintaan gagal atau muncul `Unknown column 'session_version'` setelah `git pull`**
 Database belum diperbarui. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data dan akun tidak berubah.
+
+**`Unknown column 'kitchen_status'` atau `Data truncated for column 'role'` (layar dapur kosong atau error, atau akun Dapur tidak bisa dibuat)**
+Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data tidak hilang.
+
+**"Akun dapur hanya dapat memakai layar dapur"**
+Itu disengaja: akun peran Dapur hanya boleh membuka layar dapur (`/dapur`). Untuk memakai aplikasi kasir, login dengan akun kasir, supervisor, atau admin.
 
 **"Pengaturan pajak dan service belum lengkap" atau `Unknown column 'tax_rate'` saat membuat atau membayar pesanan**
 Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data tidak hilang.

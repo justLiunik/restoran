@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Layar Dapur - Resto Rasa Nusantara</title>
+  <style>
+    :root {
+      --bg-main: #0b1120;
+      --bg-card: #1e293b;
+      --bg-subtle: #0f172a;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --primary: #ea580c;
+      --primary-hover: #c2410c;
+      --primary-subtle: #431407;
+      --success: #16a34a;
+      --success-subtle: #052e16;
+      --warning: #d97706;
+      --warning-subtle: #451a03;
+      --danger: #dc2626;
+      --danger-subtle: #450a0a;
+      --info: #3b82f6;
+      --info-subtle: #172554;
+      --radius: 12px;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg-main); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; }
+
+    header { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 30; box-shadow: var(--shadow); }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon { width: 42px; height: 42px; background: var(--primary); color: #fff; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+    .brand-title { font-size: 20px; font-weight: 800; }
+    .brand-sub { font-size: 11px; color: var(--text-muted); }
+    .counts { display: flex; gap: 10px; }
+    .count-pill { display: flex; align-items: baseline; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; border: 1px solid var(--border); background: var(--bg-subtle); }
+    .count-pill b { font-size: 22px; }
+    .count-pill.baru { color: var(--info); border-color: var(--info); }
+    .count-pill.diproses { color: var(--warning); border-color: var(--warning); }
+    .head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .clock { font-family: monospace; font-size: 16px; color: var(--text-muted); background: var(--bg-subtle); border: 1px solid var(--border); padding: 6px 10px; border-radius: 8px; }
+    .user-chip { font-size: 12px; color: var(--text-muted); text-align: right; line-height: 1.3; }
+    .user-chip b { color: var(--text-main); font-size: 13px; }
+
+    .btn { border: none; outline: none; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.15s, transform 0.05s; color: var(--text-main); }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.55; cursor: wait; }
+    .btn-subtle { background: var(--bg-subtle); border: 1px solid var(--border); }
+    .btn-subtle:hover { background: var(--border); }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { background: #15803d; }
+    .btn-warn { background: var(--warning); color: #fff; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-big { min-height: 58px; font-size: 18px; width: 100%; border-radius: 10px; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    .notice { padding: 8px 20px; font-size: 13px; background: var(--info-subtle); color: #bfdbfe; border-bottom: 1px solid var(--border); display: none; }
+    .notice.show { display: block; }
+    .notice.offline { background: var(--danger-subtle); color: #fecaca; }
+
+    main { flex: 1; padding: 16px 20px; }
+    .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+    .empty { grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 80px 20px; font-size: 20px; }
+    .empty .big { font-size: 56px; margin-bottom: 10px; }
+
+    .ticket { background: var(--bg-card); border: 3px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+    .ticket.st-baru { border-color: var(--info); }
+    .ticket.st-diproses { border-color: var(--warning); }
+    .ticket.late { border-color: var(--danger); }
+    .ticket.cancelled { border-color: var(--danger); background: var(--danger-subtle); }
+    .ticket.fresh { animation: pulse 0.9s ease-in-out 8; }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(234, 88, 12, 0); } 50% { box-shadow: 0 0 0 8px rgba(234, 88, 12, 0.45); } }
+    .t-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .t-no { font-size: 20px; font-weight: 800; }
+    .t-timer { font-family: monospace; font-size: 24px; font-weight: 800; padding: 2px 10px; border-radius: 8px; background: var(--success-subtle); color: #4ade80; }
+    .t-timer.warn { background: var(--warning-subtle); color: #fbbf24; }
+    .t-timer.late { background: var(--danger-subtle); color: #f87171; }
+    .t-timer.off { background: var(--bg-subtle); color: var(--text-muted); }
+    .t-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--text-muted); }
+    .chip { padding: 3px 10px; border-radius: 999px; font-weight: 800; font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); color: var(--text-main); }
+    .chip.type-dine { background: var(--info-subtle); border-color: var(--info); color: #bfdbfe; }
+    .chip.type-take { background: var(--warning-subtle); border-color: var(--warning); color: #fde68a; }
+    .chip.type-deliv { background: var(--success-subtle); border-color: var(--success); color: #bbf7d0; }
+    .chip.st-baru { background: var(--info); border-color: var(--info); color: #fff; }
+    .chip.st-diproses { background: var(--warning); border-color: var(--warning); color: #fff; }
+    .banner { border-radius: 8px; padding: 8px 10px; font-weight: 800; font-size: 15px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .banner.changed { background: var(--warning); color: #fff; }
+    .banner.cancel { background: var(--danger); color: #fff; }
+    .banner .btn { padding: 6px 12px; font-size: 13px; background: rgba(255, 255, 255, 0.22); color: #fff; }
+    .t-items { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .t-items li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+    .cancelled .t-items .n { text-decoration: line-through; opacity: 0.75; }
+    .t-items .q { font-size: 26px; font-weight: 800; color: #fb923c; min-width: 44px; }
+    .t-items .n { font-size: 21px; font-weight: 700; }
+    .t-items .note { flex-basis: 100%; margin-left: 54px; font-size: 16px; font-weight: 700; color: #fde68a; background: var(--warning-subtle); border-left: 4px solid var(--warning); padding: 3px 8px; border-radius: 4px; }
+    .t-actions { display: flex; flex-direction: column; gap: 8px; }
+
+    .ready { background: var(--bg-card); border-top: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; bottom: 0; z-index: 20; }
+    .ready-title { font-size: 13px; font-weight: 800; color: var(--text-muted); white-space: nowrap; }
+    .ready-list { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ready-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; background: var(--success-subtle); border: 1px solid var(--success); color: #bbf7d0; font-size: 13px; font-weight: 700; }
+    .ready-chip .ago { color: var(--text-muted); font-weight: 600; }
+    .ready-empty { font-size: 13px; color: var(--text-muted); }
+
+    .overlay { position: fixed; inset: 0; background: rgba(2, 6, 23, 0.85); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+    .overlay.open { display: flex; }
+    .login-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 100%; max-width: 380px; box-shadow: var(--shadow); }
+    .login-card h1 { font-size: 22px; text-align: center; margin: 6px 0 2px; }
+    .login-card p.sub { text-align: center; color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
+    .login-card label { display: block; font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+    .login-card input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-subtle); color: var(--text-main); font-size: 16px; }
+    .login-card .btn { width: 100%; margin-top: 16px; min-height: 48px; }
+    .login-error { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 18px; text-align: center; }
+    .toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); background: #020617; border: 1px solid var(--border); color: var(--text-main); padding: 10px 18px; border-radius: 10px; font-size: 14px; z-index: 120; display: none; max-width: 90vw; }
+    .toast.show { display: block; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    @media (max-width: 520px) { header { padding: 8px 12px; } main { padding: 12px; } .board { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">🍳</div>
+      <div>
+        <div class="brand-title">Layar Dapur</div>
+        <div class="brand-sub">Resto Rasa Nusantara</div>
+      </div>
+    </div>
+    <div class="counts" aria-live="polite">
+      <div class="count-pill baru">Baru <b id="count-baru">0</b></div>
+      <div class="count-pill diproses">Dapur <b id="count-diproses">0</b></div>
+    </div>
+    <div class="head-right">
+      <div class="clock" id="clock">--:--:--</div>
+      <button class="btn btn-subtle" id="btn-sound" onclick="toggleSound()" title="Bunyi untuk pesanan baru, diubah, dan dibatalkan">🔔 Suara: Aktif</button>
+      <button class="btn btn-subtle" onclick="toggleFullscreen()" title="Layar penuh">⛶</button>
+      <a class="btn btn-subtle" id="link-pos" href="/" style="display:none;text-decoration:none;">← Kasir</a>
+      <div class="user-chip"><b id="user-name">-</b><br><span id="user-role">-</span></div>
+      <button class="btn btn-subtle btn-sm" onclick="logout()">Keluar</button>
+    </div>
+  </header>
+
+  <div class="notice" id="notice"></div>
+
+  <main>
+    <div class="board" id="board"></div>
+  </main>
+
+  <section class="ready" aria-label="Baru siap">
+    <div class="ready-title">✓ Baru siap</div>
+    <div class="ready-list" id="ready-list"><span class="ready-empty">Belum ada</span></div>
+  </section>
+
+  <div class="overlay" id="login-overlay">
+    <form class="login-card" onsubmit="submitLogin(event)">
+      <div style="text-align:center;font-size:40px;">🍳</div>
+      <h1>Layar Dapur</h1>
+      <p class="sub" id="login-sub">Masuk dengan akun dapur</p>
+      <label for="login-username">Username</label>
+      <input id="login-username" autocomplete="username" autocapitalize="none" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required>
+      <div class="login-error" id="login-error" role="alert"></div>
+      <button class="btn btn-primary" type="submit">Masuk</button>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    // ---------- state ----------
+    let authToken = localStorage.getItem("pos_jwt");
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem("pos_user")); } catch (e) {}
+    let data = null;              // last answer of GET /api/kitchen/orders
+    let fetchedAt = 0;            // Date.now() when `data` arrived (tickets age on the screen from there)
+    let ticketById = new Map();
+    let lastSig = "";
+    let polling = null;
+    let clockTimer = null;
+    let tickTimer = null;
+    let firstLoad = true;
+    let knownIds = new Set();     // tickets already shown (to hear only NEW ones)
+    let knownAlerts = new Map();  // ticket id -> alert already announced
+    let freshUntil = new Map();   // ticket id -> time until which it pulses
+    let busy = new Set();         // tickets with an action in flight
+    let offline = false;
+    let soundOn = localStorage.getItem("dapur_sound") !== "0";
+    let audioCtx = null;
+    let wakeLock = null;
+    const POLL_MS = 5000;
+
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const ROLE_LABEL = { kasir: "Kasir", supervisor: "Supervisor", admin: "Admin", dapur: "Dapur" };
+    const PLATFORM_LABEL = { gofood: "GoFood", grabfood: "GrabFood", shopeefood: "ShopeeFood" };
+
+    // ---------- helpers ----------
+    function showToast(msg, ms = 3500) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => t.classList.remove("show"), ms);
+    }
+
+    function setNotice(text, offlineStyle = false) {
+      const n = document.getElementById("notice");
+      n.textContent = text || "";
+      n.classList.toggle("show", !!text);
+      n.classList.toggle("offline", !!text && offlineStyle);
+    }
+
+    function fmtTimer(totalSeconds) {
+      const s = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      if (h > 0) return `${h}j ${String(m).padStart(2, "0")}m`;
+      return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+    }
+
+    const elapsed = () => (Date.now() - fetchedAt) / 1000;
+    const canUpdate = () => !!(data && data.can_update);
+
+    // ---------- sound ----------
+    function ensureAudio() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+      } catch (e) {}
+      return audioCtx;
+    }
+    function tone(freq, start, dur, vol = 0.25) {
+      const ctx = audioCtx;
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur + 0.05);
+    }
+    // kind: "new" (two rising notes) | "alert" (three urgent notes: changed or cancelled)
+    function beep(kind) {
+      if (!soundOn || !ensureAudio() || audioCtx.state !== "running") return;
+      if (kind === "alert") { tone(660, 0, 0.18); tone(990, 0.22, 0.18); tone(660, 0.44, 0.18); tone(990, 0.66, 0.25); }
+      else { tone(880, 0, 0.2); tone(1175, 0.22, 0.3); }
+    }
+    function renderSoundButton() {
+      const b = document.getElementById("btn-sound");
+      b.textContent = soundOn ? "🔔 Suara: Aktif" : "🔕 Suara: Mati";
+    }
+    function toggleSound() {
+      soundOn = !soundOn;
+      localStorage.setItem("dapur_sound", soundOn ? "1" : "0");
+      renderSoundButton();
+      if (soundOn) { ensureAudio(); beep("new"); }
+    }
+    // Browsers only allow sound after a tap: the first tap anywhere unlocks it
+    ["pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, () => ensureAudio(), { once: true }));
+
+    function toggleFullscreen() {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+    }
+    async function keepScreenOn() {
+      try { if (navigator.wakeLock && !wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && authToken) { keepScreenOn(); poll(); } });
+
+    // ---------- login ----------
+    function openLogin(message) {
+      document.getElementById("login-error").textContent = message || "";
+      document.getElementById("login-overlay").classList.add("open");
+      setTimeout(() => document.getElementById("login-username").focus(), 50);
+    }
+
+    async function submitLogin(e) {
+      e.preventDefault();
+      const errEl = document.getElementById("login-error");
+      errEl.textContent = "";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: document.getElementById("login-username").value.trim(), password: document.getElementById("login-password").value })
+        });
+        const body = await res.json();
+        if (!res.ok) { errEl.textContent = body.error || "Login gagal"; return; }
+        authToken = body.token;
+        currentUser = body.user;
+        localStorage.setItem("pos_jwt", authToken);
+        localStorage.setItem("pos_user", JSON.stringify(currentUser));
+        document.getElementById("login-password").value = "";
+        document.getElementById("login-overlay").classList.remove("open");
+        ensureAudio();
+        start();
+      } catch (err) {
+        errEl.textContent = "Tidak bisa terhubung ke server";
+      }
+    }
+
+    function logout(message) {
+      localStorage.removeItem("pos_jwt");
+      localStorage.removeItem("pos_user");
+      authToken = null; currentUser = null; data = null;
+      clearInterval(polling); clearInterval(tickTimer);
+      polling = null; tickTimer = null; firstLoad = true; lastSig = "";
+      knownIds = new Set(); knownAlerts = new Map(); freshUntil = new Map();
+      document.getElementById("board").innerHTML = "";
+      document.getElementById("ready-list").innerHTML = `<span class="ready-empty">Belum ada</span>`;
+      ["count-baru", "count-diproses"].forEach(id => { document.getElementById(id).textContent = "0"; });
+      setNotice("");
+      openLogin(typeof message === "string" ? message : "");
+    }
+
+    // ---------- data ----------
+    async function api(path, options = {}) {
+      const res = await fetch(path, { ...options, headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}`, ...(options.headers || {}) } });
+      let body = null;
+      try { body = await res.json(); } catch (e) {}
+      if (res.status === 401) { logout((body && body.error) || "Sesi berakhir, silakan masuk lagi"); throw new Error("401"); }
+      if (!res.ok) throw new Error((body && body.error) || "Terjadi kesalahan pada server");
+      return body;
+    }
+
+    async function poll() {
+      if (!authToken) return;
+      try {
+        const res = await api("/api/kitchen/orders");
+        if (offline) { offline = false; setNotice(viewOnlyText()); }
+        data = res;
+        fetchedAt = Date.now();
+        announce(res);
+        render();
+      } catch (e) {
+        if (e.message === "401") return;
+        if (e instanceof TypeError || /Failed to fetch|NetworkError/i.test(e.message)) {
+          offline = true;
+          setNotice("Tidak terhubung ke server. Tampilan terakhir ditampilkan, mencoba lagi...", true);
+        } else {
+          setNotice(e.message, true);
+        }
+      }
+    }
+
+    function viewOnlyText() {
+      if (!currentUser || currentUser.role === "dapur") return "";
+      return `Mode lihat saja (masuk sebagai ${ROLE_LABEL[currentUser.role] || currentUser.role}). Hanya akun dapur yang bisa mengubah status tiket.`;
+    }
+
+    // Sound and pulse for tickets that are new, or got a new DIUBAH / DIBATALKAN mark, since the last poll
+    function announce(res) {
+      let newTicket = false, newAlert = false;
+      const now = Date.now();
+      for (const t of res.queue) {
+        const isNew = !knownIds.has(t.id);
+        const alertChanged = t.alert && knownAlerts.get(t.id) !== t.alert;
+        if (!firstLoad) {
+          if (isNew && !t.alert) newTicket = true;
+          if (alertChanged) newAlert = true;
+          if (isNew || alertChanged) freshUntil.set(t.id, now + 8000);
+        }
+        knownIds.add(t.id);
+        if (t.alert) knownAlerts.set(t.id, t.alert); else knownAlerts.delete(t.id);
+      }
+      firstLoad = false;
+      if (newAlert) beep("alert");
+      else if (newTicket) beep("new");
+    }
+
+    // ---------- rendering ----------
+    function targetLabel(t) {
+      if (t.order_type === "dine_in") return { cls: "type-dine", text: t.table_code ? `Meja ${t.table_code}` : "Dine-in" };
+      const who = t.customer_name ? ` · ${t.customer_name}` : "";
+      if (t.order_type === "delivery") return { cls: "type-deliv", text: `${PLATFORM_LABEL[t.platform] || "Delivery"}${who}` };
+      return { cls: "type-take", text: `Take Away${who}` };
+    }
+
+    function ticketHtml(t) {
+      const lab = targetLabel(t);
+      const cancelled = t.alert === "dibatalkan";
+      const items = t.items.map(i => `
+        <li><span class="q">${i.qty}×</span><span class="n">${esc(i.name)}</span>${i.note ? `<div class="note">📝 ${esc(i.note)}</div>` : ""}</li>`).join("");
+
+      let banner = "";
+      let actions = "";
+      const can = canUpdate();
+      if (cancelled) {
+        banner = `<div class="banner cancel"><span>⛔ DIBATALKAN, jangan dimasak</span></div>`;
+        if (can) actions = `<button class="btn btn-danger btn-big" data-act="ack" data-id="${t.id}">Mengerti</button>`;
+      } else {
+        if (t.alert === "diubah") {
+          banner = `<div class="banner changed"><span>⚠ PESANAN DIUBAH, cek item</span>${can ? `<button class="btn" data-act="ack" data-id="${t.id}">Sudah dilihat</button>` : ""}</div>`;
+        }
+        if (can) {
+          actions = t.kitchen_status === "baru"
+            ? `<button class="btn btn-primary btn-big" data-act="diproses" data-id="${t.id}">Mulai Masak</button>`
+            : `<button class="btn btn-success btn-big" data-act="siap" data-id="${t.id}">Siap Saji</button>`;
+        }
+      }
+
+      const stChip = cancelled ? "" : `<span class="chip st-${t.kitchen_status}">${t.kitchen_status === "baru" ? "BARU" : "DAPUR"}</span>`;
+      const classes = ["ticket", cancelled ? "cancelled" : `st-${t.kitchen_status}`];
+      if ((freshUntil.get(t.id) || 0) > Date.now()) classes.push("fresh");
+      return `
+        <article class="${classes.join(" ")}" data-id="${t.id}">
+          <div class="t-head">
+            <div class="t-no">#${esc(t.order_no)}</div>
+            <div class="t-timer" data-timer="${t.id}">--:--</div>
+          </div>
+          <div class="t-meta"><span class="chip ${lab.cls}">${esc(lab.text)}</span>${stChip}<span>masuk ${esc(t.opened_hhmm)}</span></div>
+          ${banner}
+          <ul class="t-items">${items}</ul>
+          ${actions ? `<div class="t-actions">${actions}</div>` : ""}
+        </article>`;
+    }
+
+    function render() {
+      if (!data) return;
+      ticketById = new Map(data.queue.map(t => [t.id, t]));
+      const live = data.queue.filter(t => t.alert !== "dibatalkan");
+      document.getElementById("count-baru").textContent = live.filter(t => t.kitchen_status === "baru").length;
+      document.getElementById("count-diproses").textContent = live.filter(t => t.kitchen_status === "diproses").length;
+
+      // Rebuild only when something other than the clock changed (so a tap never lands on a re-drawn button)
+      const sig = JSON.stringify([data.can_update, data.queue.map(t => [t.id, t.order_no, t.kitchen_status, t.alert, t.table_code, t.customer_name, t.platform, t.items]),
+        data.ready.map(t => [t.id, t.order_no, t.table_code])]);
+      if (sig !== lastSig) {
+        lastSig = sig;
+        const board = document.getElementById("board");
+        board.innerHTML = data.queue.length === 0
+          ? `<div class="empty"><div class="big">🍽️</div>Belum ada pesanan. Dapur sedang kosong.</div>`
+          : data.queue.map(ticketHtml).join("");
+
+        const list = document.getElementById("ready-list");
+        list.innerHTML = data.ready.length === 0
+          ? `<span class="ready-empty">Belum ada</span>`
+          : data.ready.map(t => {
+              const lab = targetLabel(t);
+              return `<span class="ready-chip">✓ #${esc(t.order_no)} · ${esc(lab.text)} <span class="ago" data-ready-ago="${t.id}"></span>
+                ${canUpdate() ? `<button class="btn btn-subtle btn-sm" data-act="diproses" data-id="${t.id}" title="Kembalikan ke dapur">Batalkan</button>` : ""}</span>`;
+            }).join("");
+      }
+      setNotice(offline ? document.getElementById("notice").textContent : viewOnlyText(), offline);
+      tick();
+    }
+
+    // Once a second: timers and "x menit lalu" follow the clock without touching the buttons
+    function tick() {
+      const cfg = (data && data.config) || { warn_minutes: 10, late_minutes: 20 };
+      const extra = elapsed();
+      document.querySelectorAll("[data-timer]").forEach(el => {
+        const t = ticketById.get(Number(el.dataset.timer));
+        if (!t) return;
+        const age = t.age_seconds + extra;
+        el.textContent = fmtTimer(age);
+        const article = el.closest(".ticket");
+        const cancelled = t.alert === "dibatalkan";
+        const level = cancelled ? "off" : age >= cfg.late_minutes * 60 ? "late" : age >= cfg.warn_minutes * 60 ? "warn" : "ok";
+        el.className = `t-timer ${level === "ok" ? "" : level}`;
+        if (article) article.classList.toggle("late", level === "late");
+      });
+      if (data) {
+        const readyById = new Map(data.ready.map(t => [t.id, t]));
+        document.querySelectorAll("[data-ready-ago]").forEach(el => {
+          const t = readyById.get(Number(el.dataset.readyAgo));
+          if (!t) return;
+          const mins = Math.floor(((t.status_age_seconds ?? 0) + extra) / 60);
+          el.textContent = mins < 1 ? "baru saja" : `${mins} mnt lalu`;
+        });
+      }
+      document.getElementById("clock").textContent = new Date().toLocaleTimeString("id-ID", { hour12: false });
+    }
+
+    // ---------- actions ----------
+    document.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-act]");
+      if (!btn || !canUpdate()) return;
+      const id = Number(btn.dataset.id), act = btn.dataset.act;
+      if (busy.has(id)) return;
+      busy.add(id);
+      btn.disabled = true;
+      try {
+        if (act === "ack") await api(`/api/kitchen/orders/${id}/ack`, { method: "POST" });
+        else await api(`/api/kitchen/orders/${id}`, { method: "PATCH", body: JSON.stringify({ kitchen_status: act }) });
+      } catch (err) {
+        if (err.message !== "401") showToast(err.message);
+      } finally {
+        busy.delete(id);
+        await poll(); // always show what the server really has
+      }
+    });
+
+    // ---------- start ----------
+    function start() {
+      document.getElementById("user-name").textContent = currentUser ? currentUser.name : "-";
+      document.getElementById("user-role").textContent = currentUser ? (ROLE_LABEL[currentUser.role] || currentUser.role) : "-";
+      document.getElementById("link-pos").style.display = currentUser && currentUser.role !== "dapur" ? "" : "none";
+      setNotice(viewOnlyText());
+      keepScreenOn();
+      clearInterval(polling); clearInterval(tickTimer);
+      polling = setInterval(poll, POLL_MS);
+      tickTimer = setInterval(tick, 1000);
+      poll();
+    }
+
+    renderSoundButton();
+    tick();
+    if (authToken && currentUser) start(); else openLogin("");
+  </script>
+</body>
+</html>

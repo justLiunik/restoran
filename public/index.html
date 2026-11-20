@@ -251,6 +251,7 @@
     .role-badge.admin { background: var(--primary-subtle); color: var(--primary); }
     .role-badge.supervisor { background: var(--info-subtle); color: var(--info); }
     .role-badge.kasir { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border); }
+    .role-badge.dapur { background: var(--warning-subtle); color: var(--warning); }
     /* Laporan penjualan */
     .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
     .report-grid .stat-value { font-size: 18px; overflow-wrap: anywhere; }
@@ -903,6 +904,7 @@
         <option value="kasir">Kasir</option>
         <option value="supervisor">Supervisor</option>
         <option value="admin">Admin</option>
+        <option value="dapur">Dapur</option>
       </select>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px;" id="uf-role-note"></div>
 
@@ -1458,6 +1460,10 @@
         localStorage.setItem("pos_jwt", authToken);
         localStorage.setItem("pos_user", JSON.stringify(currentUser));
 
+        if (currentUser.role === "dapur") { // a kitchen account only has the kitchen screen
+          location.replace("/dapur.html");
+          return;
+        }
         closeModal("modal-login");
         updateUserProfileHeader();
         initApp();
@@ -4448,7 +4454,7 @@
 
     // ---------- AKUN SAYA & KELOLA USER ----------
     // The server enforces every rule (admin only, last admin, own account, open shifts, unique PINs); this only shows them.
-    const ROLE_LABEL = { kasir: "Kasir", supervisor: "Supervisor", admin: "Admin" };
+    const ROLE_LABEL = { kasir: "Kasir", supervisor: "Supervisor", admin: "Admin", dapur: "Dapur" };
     const PIN_ROLES_UI = ["supervisor", "admin"];
     let adminUsers = [];
     let userFormId = null;        // null = adding a user
@@ -4470,6 +4476,11 @@
       if (!authToken) return;
       try {
         const me = await api('/api/me');
+        if (me.role === "dapur") { // an admin just made this account a kitchen account: it only has the kitchen screen now
+          localStorage.setItem("pos_user", JSON.stringify({ ...currentUser, ...me }));
+          location.replace("/dapur.html");
+          return;
+        }
         if (!currentUser || me.role !== currentUser.role || me.name !== currentUser.name || me.username !== currentUser.username) {
           const roleChanged = !currentUser || me.role !== currentUser.role;
           currentUser = { ...currentUser, ...me };
@@ -4745,7 +4756,7 @@
       const role = document.getElementById("uf-role").value;
       const creating = userFormId === null;
       document.getElementById("uf-password-wrap").style.display = creating ? "block" : "none";
-      const needsPin = PIN_ROLES_UI.includes(role) && (creating || userFormOrigRole === "kasir");
+      const needsPin = PIN_ROLES_UI.includes(role) && (creating || !PIN_ROLES_UI.includes(userFormOrigRole));
       document.getElementById("uf-pin-wrap").style.display = needsPin ? "block" : "none";
 
       let note = "";
@@ -4755,7 +4766,9 @@
           ? (PIN_ROLES_UI.includes(userFormOrigRole) ? "" : "Mengisi PIN wajib untuk supervisor dan admin.")
           : "PIN user ini akan dihapus.";
       } else if (creating) {
-        note = role === "kasir" ? "Kasir membuat pesanan dan menerima pembayaran." : "Supervisor dan admin wajib punya PIN untuk otorisasi diskon besar dan void.";
+        note = role === "kasir" ? "Kasir membuat pesanan dan menerima pembayaran."
+          : role === "dapur" ? "Akun dapur hanya membuka Layar Dapur (/dapur) di perangkat dapur, tanpa PIN dan tanpa shift."
+          : "Supervisor dan admin wajib punya PIN untuk otorisasi diskon besar dan void.";
       }
       document.getElementById("uf-role-note").textContent = note;
     }
@@ -5013,6 +5026,10 @@
 
     // ---------- APP INIT & POLLING ----------
     function initApp() {
+      if (authToken && currentUser && currentUser.role === "dapur") { // already logged in as the kitchen account
+        location.replace("/dapur.html");
+        return;
+      }
       renderOrderPanel();
       if (!authToken) {
         openModal("modal-login");

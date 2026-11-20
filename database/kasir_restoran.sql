@@ -15,7 +15,7 @@ CREATE TABLE users (
   username      VARCHAR(50)  NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   pin_hash      VARCHAR(255) NULL COMMENT 'PIN untuk otorisasi void/diskon besar (supervisor/admin)',
-  role          ENUM('kasir','supervisor','admin') NOT NULL DEFAULT 'kasir',
+  role          ENUM('kasir','supervisor','admin','dapur') NOT NULL DEFAULT 'kasir',
   is_active     TINYINT(1) NOT NULL DEFAULT 1,
   session_version INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'dinaikkan untuk mengakhiri semua sesi login user ini',
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -107,6 +107,9 @@ CREATE TABLE orders (
   cashier_id       INT UNSIGNED NOT NULL,
   shift_id         INT UNSIGNED NULL,
   status           ENUM('baru','diproses','siap_saji','belum_dibayar','selesai','hold','void') NOT NULL DEFAULT 'baru',
+  kitchen_status   ENUM('baru','diproses','siap') NOT NULL DEFAULT 'baru' COMMENT 'status di layar dapur, terpisah dari status kasir',
+  kitchen_status_at DATETIME NULL COMMENT 'kapan status dapur terakhir berubah',
+  kitchen_alert    ENUM('diubah','dibatalkan') NULL COMMENT 'tanda untuk dapur sampai dilihat',
   subtotal         DECIMAL(12,2) NOT NULL DEFAULT 0,
   discount_percent DECIMAL(5,2)  NOT NULL DEFAULT 0,
   discount_amount  DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -264,9 +267,9 @@ INSERT INTO cash_movements (shift_id, type, amount, reason) VALUES
 (1, 'out', 50000, 'Beli es batu');
 
 -- Order 1: selesai dibayar QRIS
-INSERT INTO orders (id, order_no, order_type, table_id, cashier_id, shift_id, status,
+INSERT INTO orders (id, order_no, order_type, table_id, cashier_id, shift_id, status, kitchen_status,
                     subtotal, tax_rate, tax_amount, service_rate, service_amount, total, closed_at)
-VALUES (1, 'INV-0001', 'dine_in', 2, 3, 1, 'selesai', 68000, 10, 6800, 5, 3400, 78200, NOW());
+VALUES (1, 'INV-0001', 'dine_in', 2, 3, 1, 'selesai', 'siap', 68000, 10, 6800, 5, 3400, 78200, NOW());
 
 INSERT INTO order_items (order_id, product_id, product_name, price, qty) VALUES
 (1, 1, 'Nasi Goreng Spesial', 28000, 2),
@@ -276,18 +279,18 @@ INSERT INTO payments (order_id, payment_method_id, shift_id, amount, reference_n
 (1, 2, 1, 78200, 'QRIS-20260001');
 
 -- Order 2: dine-in aktif di T03, sedang diproses dapur
-INSERT INTO orders (id, order_no, order_type, table_id, cashier_id, shift_id, status,
+INSERT INTO orders (id, order_no, order_type, table_id, cashier_id, shift_id, status, kitchen_status,
                     subtotal, tax_rate, tax_amount, service_rate, service_amount, total)
-VALUES (2, 'INV-0002', 'dine_in', 3, 3, 1, 'diproses', 45000, 10, 4500, 5, 2250, 51750);
+VALUES (2, 'INV-0002', 'dine_in', 3, 3, 1, 'diproses', 'diproses', 45000, 10, 4500, 5, 2250, 51750);
 
 INSERT INTO order_items (order_id, product_id, product_name, price, qty, note) VALUES
 (2, 3, 'Ayam Bakar Madu', 35000, 1, 'Tidak pedas'),
 (2, 9, 'Es Jeruk',        10000, 1, NULL);
 
 -- Order 3: delivery GoFood, baru masuk
-INSERT INTO orders (id, order_no, order_type, platform, customer_name, cashier_id, shift_id, status,
+INSERT INTO orders (id, order_no, order_type, platform, customer_name, cashier_id, shift_id, status, kitchen_status,
                     subtotal, tax_rate, tax_amount, service_rate, service_amount, total)
-VALUES (3, 'INV-0003', 'delivery', 'gofood', 'Andi', 3, 1, 'baru', 52000, 10, 5200, 0, 0, 57200);
+VALUES (3, 'INV-0003', 'delivery', 'gofood', 'Andi', 3, 1, 'baru', 'baru', 52000, 10, 5200, 0, 0, 57200);
 
 INSERT INTO order_items (order_id, product_id, product_name, price, qty) VALUES
 (3, 2, 'Mie Goreng Seafood', 26000, 2);
