@@ -212,6 +212,16 @@
     .order-panel.idle .order-footer, .order-panel.idle #btn-panel-close { display: none; }
     .panel-idle { margin: auto; text-align: center; color: var(--text-muted); font-size: 12px; line-height: 1.5; padding: 20px 10px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 
+    /* Akun yang tidak menangani pesanan (admin, supervisor): hanya melihat. Kelasnya dipasang oleh applyRoleUi() lewat canHandleOrders(). */
+    .readonly-badge { background: var(--info-subtle); color: var(--info); border: 1px solid var(--info); border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    body.view-only .table-box.kosong, body.view-only .menu-item-card { cursor: default; }
+    body.view-only .table-box.kosong:hover { transform: none; }
+    body.view-only .menu-item-card:hover { border-color: var(--border); box-shadow: none; }
+    .order-panel.readonly #payment-options-container, .order-panel.readonly #cash-input-group, .order-panel.readonly .order-btn-actions { display: none !important; }
+    .order-readonly-note { margin-top: 6px; font-size: 11px; color: var(--text-muted); text-align: center; }
+    .item-note-line.static { cursor: default; }
+    .ao-status { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle); border: 1px solid var(--border); white-space: nowrap; }
+
     /* Catatan item */
     .item-note-line { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: none; background: var(--primary-subtle); color: var(--primary); font-size: 11px; font-weight: 600; font-style: italic; padding: 3px 8px; border-radius: 6px; cursor: pointer; text-align: left; width: fit-content; }
     .note-editor { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px; }
@@ -315,6 +325,7 @@
     </div>
     <div class="header-actions">
       <div class="clock-badge" id="live-clock">--:--:-- WIB</div>
+      <div class="readonly-badge" id="readonly-badge" style="display:none;" title="Akun ini hanya bisa melihat. Membuat atau mengubah pesanan dan shift dilakukan oleh kasir."></div>
       <div class="cashier-tag" id="user-profile-tag" style="cursor: pointer;" title="Klik untuk keluar" onclick="logoutUser()">
         <div class="cashier-avatar" id="header-user-avatar">?</div>
         <div>
@@ -334,7 +345,7 @@
           <div id="notif-list-container"></div>
         </div>
       </div>
-      <button class="btn btn-primary btn-lg" onclick="startNewOrderFlow()">+ Pesanan Baru</button>
+      <button class="btn btn-primary btn-lg" id="btn-new-order" onclick="startNewOrderFlow()">+ Pesanan Baru</button>
     </div>
   </header>
 
@@ -354,7 +365,7 @@
       <div class="stat-value" id="stat-tax-service">Rp 0</div>
       <div class="stat-meta">Total potongan diskon: <span id="stat-discount" style="color:var(--danger);">Rp 0</span></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" id="stat-card-shift">
       <div class="stat-label">Shift Kasir Aktif</div>
       <div class="stat-value" id="stat-shift-cash">Rp 0</div>
       <div class="stat-meta"><button class="btn btn-subtle btn-sm" style="padding:2px 6px;" onclick="openShiftModal()">Kelola / Tutup Shift</button></div>
@@ -1243,6 +1254,14 @@
     // "Simpan Pesanan" / "Hold" / "Bayar". Unsaved working copies are mirrored in localStorage (DRAFT_KEY).
     const DRAFT_KEY = "pos_order_draft_v1";
     const NOTE_CHIPS = ["Tidak pedas", "Pedas", "Tanpa es", "Kurang manis", "Dibungkus"];
+    // The ONE place that decides who may run a shift and create or change orders. Admin and supervisor only watch.
+    // The server enforces the same rule (ORDER_HANDLER_ROLES in server.js). Add "supervisor" here to let them take orders too.
+    function canHandleOrders() {
+      return !!currentUser && ["kasir"].includes(currentUser.role);
+    }
+
+    const ORDER_STATUS_LABEL = { baru: "Baru", diproses: "Dapur", siap_saji: "Siap Saji", belum_dibayar: "Belum Bayar", hold: "Hold" };
+
     let panelOpen = false;       // false = panel idle (no order open)
     let orderBusy = false;       // true while save/hold/pay is running (blocks double submit)
     let lineUid = 0;             // unique id for each item line in the working copy
@@ -1556,6 +1575,7 @@
     }
 
     async function fetchCurrentShift() {
+      if (!canHandleOrders()) { currentShift = null; return; } // no shift for this account: nothing to ask (the card is hidden)
       try {
         const res = await api('/api/shifts/current');
         currentShift = res.shift;
@@ -1670,13 +1690,15 @@
           ${resvText}
         `;
 
-        div.onclick = () => handleTableClick(tbl);
+        // An empty table only starts a new order: an account that cannot handle orders gets no click (and no pointer, see CSS)
+        if (tbl.status !== "kosong" || canHandleOrders()) div.onclick = () => handleTableClick(tbl);
         container.appendChild(div);
       });
     }
 
     function handleTableClick(tbl) {
       if (tbl.status === "kosong") {
+        if (!canHandleOrders()) return;
         // Same table is already being edited as a new (unsaved) order: just go back to it
         if (panelOpen && !currentOrder.id && currentOrder.table_id === tbl.id) {
           switchTab("menu");
@@ -1693,8 +1715,9 @@
         // reserved table: open the booking (Tamu Datang / Ubah / Tidak Datang / Batal), never a walk-in order
         openReservationDetail(tbl.reservation.id);
       } else if (tbl.seated_reservation) {
-        // guest already seated from a reservation but has not ordered yet
-        openSeatedOrder(tbl.seated_reservation.id);
+        // guest already seated from a reservation but has not ordered yet: a cashier opens their order, others see the booking
+        if (canHandleOrders()) openSeatedOrder(tbl.seated_reservation.id);
+        else openReservationDetail(tbl.seated_reservation.id);
       } else if (tbl.status === "reservasi") {
         showToast(`${tbl.code}: Meja telah direservasi`);
       }
@@ -1723,6 +1746,7 @@
         return;
       }
 
+      const handler = canHandleOrders(); // others get the status as text and "Lihat" instead of "Buka" / "Lanjutkan"
       list.forEach(ord => {
         const row = document.createElement("div");
         row.className = "order-card-row";
@@ -1758,17 +1782,21 @@
             ${itemsHtml ? `<div class="ao-items">${itemsHtml}</div>` : ""}
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
-            <select class="btn btn-subtle btn-sm" style="font-size:11px;padding:3px 6px;" onchange="handleOrderStatusChange(${ord.id}, this.value)">
+            ${handler
+              ? `<select class="btn btn-subtle btn-sm" style="font-size:11px;padding:3px 6px;" onchange="handleOrderStatusChange(${ord.id}, this.value)">
               <option value="baru" ${ord.status==='baru'?'selected':''}>Baru</option>
               <option value="diproses" ${ord.status==='diproses'?'selected':''}>Dapur</option>
               <option value="siap_saji" ${ord.status==='siap_saji'?'selected':''}>Siap Saji</option>
               <option value="belum_dibayar" ${ord.status==='belum_dibayar'?'selected':''}>Belum Bayar</option>
               <option value="hold" ${ord.status==='hold'?'selected':''}>Hold</option>
-            </select>
+            </select>`
+              : `<span class="ao-status">${esc(ORDER_STATUS_LABEL[ord.status] || ord.status)}</span>`}
             <button class="btn btn-subtle btn-sm" title="Simulasi Split Bill" onclick="openSplitBillModal(${ord.id})">Split</button>
-            ${isHold
-              ? `<button class="btn btn-primary btn-sm" onclick="resumeHeldOrder(${ord.id})">Lanjutkan</button>`
-              : `<button class="btn btn-primary btn-sm" onclick="requestOpenOrder(${ord.id})">Buka</button>`}
+            ${!handler
+              ? `<button class="btn btn-primary btn-sm" onclick="requestOpenOrder(${ord.id})">Lihat</button>`
+              : isHold
+                ? `<button class="btn btn-primary btn-sm" onclick="resumeHeldOrder(${ord.id})">Lanjutkan</button>`
+                : `<button class="btn btn-primary btn-sm" onclick="requestOpenOrder(${ord.id})">Buka</button>`}
           </div>
         `;
         container.appendChild(row);
@@ -1776,6 +1804,7 @@
     }
 
     async function handleOrderStatusChange(ordId, newStatus) {
+      if (!canHandleOrders()) return;
       try {
         await api(`/api/orders/${ordId}/status`, {
           method: 'PATCH',
@@ -1828,7 +1857,8 @@
         discountPercent: Number(ord.discount_percent) || 0,
         // the rates this order was created with: they stay the same even if an admin changes the rates later
         taxRate: Number(ord.tax_rate) || 0,
-        serviceRate: Number(ord.service_rate) || 0
+        serviceRate: Number(ord.service_rate) || 0,
+        cashierName: ord.cashier_name || ""
       };
       o.baseSig = orderSignature(o);
       return o;
@@ -1950,7 +1980,8 @@
           </div>
         `;
 
-        card.onclick = () => addItemToOrder(item);
+        // The cards stay visible for everyone; only an account that handles orders can add a menu to an order by clicking
+        if (canHandleOrders()) card.onclick = () => addItemToOrder(item);
         grid.appendChild(card);
       });
     }
@@ -2056,6 +2087,7 @@
     }
 
     function startNewOrder({ target, table_id = null, type = "dine_in", platform = null, customer_name = null }) {
+      if (!canHandleOrders()) return;
       openPanel({ ...blankOrder(), target, table_id, type, platform, customer_name });
       showToast(`Memulai pesanan baru (${target})`);
     }
@@ -2102,7 +2134,7 @@
 
     // Brings back an unsaved working copy after a page refresh
     async function restoreDraft() {
-      if (panelOpen) return;
+      if (panelOpen || !canHandleOrders()) return; // a draft is an order being written: only for an account that writes orders
       let saved = null;
       try { saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch (e) {}
       if (!saved || !saved.order || !Array.isArray(saved.order.items)) return;
@@ -2157,6 +2189,7 @@
     }
 
     function addItemToOrder(item) {
+      if (!canHandleOrders()) return;
       item = productStock[item.id] || item; // latest known stock
       if (getStockStatus(item) === "habis") {
         showToast(`Menu ${item.name} sedang habis!`);
@@ -2191,6 +2224,7 @@
     }
 
     function changeItemQty(uid, delta) {
+      if (!canHandleOrders()) return;
       const it = findLine(uid);
       if (!it) return;
 
@@ -2212,6 +2246,7 @@
     // ---- item notes ----
 
     function openNoteEditor(uid) {
+      if (!canHandleOrders()) return;
       noteEditUid = uid;
       renderOrderPanel();
       const input = document.getElementById(`note-input-${uid}`);
@@ -2267,6 +2302,9 @@
     function renderOrderPanel() {
       const panel = document.querySelector(".order-panel");
       panel.classList.toggle("idle", !panelOpen);
+      // An account that does not handle orders sees the order read-only: no quantity, note, discount, payment or save buttons
+      const readOnly = !canHandleOrders();
+      panel.classList.toggle("readonly", readOnly);
 
       const titleEl = document.getElementById("panel-order-title");
       const subEl = document.getElementById("panel-order-subtitle");
@@ -2275,7 +2313,9 @@
       if (!panelOpen) {
         titleEl.textContent = "Panel Pesanan";
         subEl.textContent = "Belum ada pesanan dibuka";
-        listContainer.innerHTML = `
+        listContainer.innerHTML = readOnly
+          ? `<div class="panel-idle"><div>Pilih meja pada denah atau buka pesanan dari daftar Pesanan Aktif<br>untuk melihat isinya.</div></div>`
+          : `
           <div class="panel-idle">
             <div>Pilih meja pada denah, buka pesanan dari daftar Pesanan Aktif,<br>atau mulai pesanan baru.</div>
             <button type="button" class="btn btn-primary btn-sm" onclick="startNewOrderFlow()">+ Pesanan Baru</button>
@@ -2284,23 +2324,29 @@
       }
 
       titleEl.textContent = currentOrder.order_no ? `Pesanan #${currentOrder.order_no}` : "Pesanan Baru";
-      subEl.innerHTML = `${esc(currentOrder.target)} • ${currentOrder.type === 'dine_in' ? 'Dine-in' : (currentOrder.type === 'delivery' ? 'Delivery' : 'Take Away')}`
-        + (currentOrder.status === "hold" ? ` • <b style="color:var(--warning);">Hold</b>` : "")
-        + (isOrderDirty() ? ` • <b style="color:var(--primary);">Belum disimpan</b>` : "");
+      const typeLabel = currentOrder.type === 'dine_in' ? 'Dine-in' : (currentOrder.type === 'delivery' ? 'Delivery' : 'Take Away');
+      subEl.innerHTML = readOnly
+        ? `${esc(currentOrder.target)} • ${typeLabel} • Status: <b>${esc(ORDER_STATUS_LABEL[currentOrder.status] || currentOrder.status || "-")}</b>`
+          + (currentOrder.cashierName ? ` • Kasir: ${esc(currentOrder.cashierName)}` : "")
+        : `${esc(currentOrder.target)} • ${typeLabel}`
+          + (currentOrder.status === "hold" ? ` • <b style="color:var(--warning);">Hold</b>` : "")
+          + (isOrderDirty() ? ` • <b style="color:var(--primary);">Belum disimpan</b>` : "");
 
       listContainer.innerHTML = "";
 
       if (currentOrder.items.length === 0) {
-        listContainer.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:40px;">Belum ada item dipilih.<br>Klik menu untuk menambahkan.</div>`;
+        listContainer.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:40px;">Belum ada item dipilih.${readOnly ? "" : "<br>Klik menu untuk menambahkan."}</div>`;
       } else {
         currentOrder.items.forEach((it) => {
           const row = document.createElement("div");
           row.className = "order-item-row";
-          const editing = noteEditUid === it.uid;
+          const editing = !readOnly && noteEditUid === it.uid;
           const note = cleanNote(it.note);
 
           let noteBlock = "";
-          if (editing) {
+          if (readOnly) {
+            noteBlock = note ? `<div class="item-note-line static">📝 ${esc(note)}</div>` : "";
+          } else if (editing) {
             const active = note.toLowerCase().split(",").map(s => s.trim());
             noteBlock = `
               <div class="note-editor">
@@ -2326,13 +2372,15 @@
             <div class="order-item-sub">
               <div class="order-item-unit">
                 <span>${formatRp(it.price)}</span>
-                ${(!note && !editing) ? `<button type="button" class="note-toggle" onclick="openNoteEditor(${it.uid})">+ Catatan</button>` : ""}
+                ${(!readOnly && !note && !editing) ? `<button type="button" class="note-toggle" onclick="openNoteEditor(${it.uid})">+ Catatan</button>` : ""}
               </div>
-              <div class="qty-controls">
+              ${readOnly
+                ? `<div class="qty-controls"><span class="qty-val">× ${it.qty}</span></div>`
+                : `<div class="qty-controls">
                 <button type="button" class="qty-btn" aria-label="Kurangi" onclick="changeItemQty(${it.uid}, -1)">−</button>
                 <span class="qty-val">${it.qty}</span>
                 <button type="button" class="qty-btn ${(productStock[it.product_id] && qtyOfProduct(it.product_id) >= Number(productStock[it.product_id].stock)) ? "at-cap" : ""}" aria-label="Tambah" onclick="changeItemQty(${it.uid}, 1)">+</button>
-              </div>
+              </div>`}
             </div>
           `;
           listContainer.appendChild(row);
@@ -2354,6 +2402,8 @@
       document.getElementById("calc-service-row").style.display = rates.service > 0 ? "" : "none";
 
       document.getElementById("input-discount-percent").value = currentOrder.discountPercent || 0;
+      document.getElementById("input-discount-percent").disabled = readOnly;
+      if (readOnly) document.getElementById("foot-details").open = true; // show subtotal, discount, tax and service right away
       document.getElementById("foot-disc-badge").textContent = currentOrder.discountPercent ? `(Diskon ${currentOrder.discountPercent}%)` : "";
 
       // Payment toggles
@@ -2378,6 +2428,7 @@
     }
 
     function setPaymentMethod(name, id) {
+      if (!canHandleOrders()) return;
       currentOrder.paymentMethod = name;
       currentOrder.paymentMethodId = id;
       renderOrderPanel();
@@ -2412,6 +2463,7 @@
     }
 
     function handleDiscountChange(val) {
+      if (!canHandleOrders()) return;
       const num = parseFloat(val) || 0;
       if (num > 20) {
         requestSupervisorAuth("Diskon di atas 20% memerlukan otorisasi supervisor.", (pinResult) => {
@@ -2433,7 +2485,7 @@
 
     // Runs one of the order actions with a lock so a double tap cannot create two orders
     async function runOrderAction(fn) {
-      if (orderBusy) return false;
+      if (orderBusy || !canHandleOrders()) return false; // save / hold / pay all go through here
       orderBusy = true;
       setPanelActionsDisabled(true);
       try {
@@ -2974,6 +3026,7 @@
 
     // 8. New Order Modal
     function openNewOrderModal() {
+      if (!canHandleOrders()) return;
       selectedOrderTypeChoice = "dine_in";
       selectedOrderTypeLabel = "Dine-in";
       selectedPlatform = null;
@@ -3061,6 +3114,7 @@
 
     // 10. Shift Modal
     async function openShiftModal() {
+      if (!canHandleOrders()) return; // shifts belong to the cashier
       await fetchCurrentShift();
       if (!currentShift) {
         document.getElementById("shift-closed-section").style.display = "block";
@@ -3079,6 +3133,7 @@
     }
 
     async function executeOpenShift() {
+      if (!canHandleOrders()) return;
       const openCash = parseFloat(document.getElementById("shift-open-cash-input").value) || 0;
       try {
         await api('/api/shifts/open', {
@@ -3092,6 +3147,7 @@
     }
 
     async function recordCashExpense() {
+      if (!canHandleOrders()) return;
       const note = document.getElementById("shift-expense-note").value.trim();
       const amt = parseFloat(document.getElementById("shift-expense-amount").value) || 0;
       if (!note || amt <= 0) {
@@ -3113,6 +3169,7 @@
     }
 
     function executeCloseShift() {
+      if (!canHandleOrders()) return;
       const actual = parseFloat(document.getElementById("shift-actual-cash-input").value);
       if (isNaN(actual)) {
         showToast("Masukkan nominal hitungan uang fisik di laci!");
@@ -3531,8 +3588,10 @@
       list.innerHTML = rows.map(r => {
         const urgent = r.status === "menunggu" && (r.phase === "soon" || r.phase === "now" || r.phase === "late");
         const cls = `resv-row${urgent ? ` ${r.phase}` : ""}${r.status !== "menunggu" ? " done" : ""}`;
-        let primary = "";
-        if (r.status === "menunggu") {
+        let primary = ""; // "Tamu Datang" / "Buka Pesanan" open an order: only for an account that handles orders
+        if (!canHandleOrders()) {
+          primary = "";
+        } else if (r.status === "menunggu") {
           primary = `<button class="btn btn-primary btn-touch" onclick="event.stopPropagation(); arriveReservation(${r.id})">Tamu Datang</button>`;
         } else if (r.status === "datang" && !r.order_id) {
           primary = `<button class="btn btn-primary btn-touch" onclick="event.stopPropagation(); openSeatedOrder(${r.id})">Buka Pesanan</button>`;
@@ -3723,7 +3782,7 @@
         const graceReached = r.phase === "late";
         const graceEnd = new Date(Date.parse(`${r.reserved_at.replace(" ", "T")}:00Z`) + reservationConfig.grace_minutes * 60000)
           .toISOString().slice(11, 16);
-        actions.push(`<button class="btn btn-primary btn-touch" onclick="arriveReservation(${r.id})">Tamu Datang</button>`);
+        if (canHandleOrders()) actions.push(`<button class="btn btn-primary btn-touch" onclick="arriveReservation(${r.id})">Tamu Datang</button>`);
         actions.push(`<button class="btn btn-subtle btn-touch" onclick="openReservationFormFromDetail(${r.id})">Ubah</button>`);
         actions.push(`<button class="btn btn-subtle btn-touch" ${graceReached ? "" : "disabled"} title="${graceReached ? "" : `Baru bisa setelah ${graceEnd}`}" onclick="reservationAction(${r.id}, 'no-show')">Tidak Datang</button>`);
         actions.push(`<button class="btn btn-subtle btn-touch" onclick="reservationAction(${r.id}, 'cancel')">Batal</button>`);
@@ -3731,7 +3790,7 @@
           document.getElementById("rd-body").innerHTML += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Tidak Datang bisa dipakai setelah ${graceEnd} (masa tenggang ${reservationConfig.grace_minutes} menit).</div>`;
         }
       } else if (r.status === "datang" && !r.order_id) {
-        actions.push(`<button class="btn btn-primary btn-touch" onclick="openSeatedOrder(${r.id})">Buka Pesanan</button>`);
+        if (canHandleOrders()) actions.push(`<button class="btn btn-primary btn-touch" onclick="openSeatedOrder(${r.id})">Buka Pesanan</button>`);
         actions.push(`<button class="btn btn-subtle btn-touch" onclick="reservationAction(${r.id}, 'cancel')">Batal</button>`);
         document.getElementById("rd-body").innerHTML += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Tamu sudah duduk tetapi belum memesan. Batal melepas meja bila tamu pergi.</div>`;
       }
@@ -3747,7 +3806,7 @@
     // "Tamu Datang": reservation -> Datang, table -> Terisi, and a new order for that table opens right away
     async function arriveReservation(id) {
       const r = reservations.find(x => x.id === id);
-      if (!r) return;
+      if (!r || !canHandleOrders()) return; // seating a guest opens an order: a cashier does it
       guardUnsaved(async () => {
         try {
           const res = await api(`/api/reservations/${id}/arrive`, { method: 'POST' });
@@ -3764,7 +3823,7 @@
     // A guest who is seated but has not ordered yet: open a new order for their table
     function openSeatedOrder(reservationId) {
       const r = reservations.find(x => x.id === reservationId);
-      if (!r || r.status !== "datang" || r.order_id) return;
+      if (!r || r.status !== "datang" || r.order_id || !canHandleOrders()) return;
       guardUnsaved(() => {
         closeModal("modal-reservation-detail");
         startNewOrder({ target: r.table_code, table_id: r.table_id, type: "dine_in", customer_name: r.customer_name });
@@ -3821,6 +3880,40 @@
       return !!currentUser && MENU_MANAGER_ROLES.includes(currentUser.role);
     }
 
+    // Who handles orders (canHandleOrders) decides what the page shows: shift card, "+ Pesanan Baru", the badge and the
+    // read-only order panel. Runs at every login and whenever the role changes (syncMe), so a refresh keeps the mode.
+    let orderModeApplied = null; // the last canHandleOrders() value that was drawn (null = nothing drawn yet)
+    function applyOrderModeUi() {
+      const handler = canHandleOrders();
+      document.body.classList.toggle("view-only", !handler);
+
+      const newOrderBtn = document.getElementById("btn-new-order");
+      if (newOrderBtn) newOrderBtn.style.display = handler ? "" : "none";
+      const shiftCard = document.getElementById("stat-card-shift");
+      if (shiftCard) shiftCard.style.display = handler ? "" : "none";
+      const badge = document.getElementById("readonly-badge");
+      if (badge) {
+        badge.style.display = handler ? "none" : "";
+        badge.textContent = handler ? "" : `Mode ${ROLE_LABEL[currentUser.role] || currentUser.role} (hanya lihat)`;
+      }
+
+      // The role changed while the page was open: redraw everything that depends on it
+      if (orderModeApplied !== null && orderModeApplied !== handler) {
+        if (!handler) {
+          if (panelOpen) closePanelState(); // an order being written is no longer this account's to write
+          closeModal("modal-new-order");
+          closeModal("modal-shift");
+        }
+        renderTables();
+        renderActiveOrders();
+        renderMenu();
+        renderReservations();
+        renderOrderPanel();
+        fetchCurrentShift();
+      }
+      orderModeApplied = handler;
+    }
+
     // Shows the "Kelola Menu" tab only to admin / supervisor and leaves it if the user may not be there
     function applyRoleUi() {
       const btn = document.getElementById("tab-btn-kelolamenu");
@@ -3830,6 +3923,7 @@
       const usersBtn = document.getElementById("tab-btn-users"); // "Kelola User": admin only
       if (usersBtn) usersBtn.style.display = isAdminRole() ? "" : "none";
       renderChargeLabels(); // "Atur" on the Pajak & Service card: admin only
+      applyOrderModeUi();
       reportRange = null; // a new login always starts the report at today
       reportData = null;
       if (!canManageMenu() && currentTab === "kelolamenu") switchTab("meja");

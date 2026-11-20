@@ -240,6 +240,16 @@ function requireRole(...roles) {
 }
 const requireAdmin = requireRole(...ADMIN_ROLES);
 
+// Roles that may run a shift and handle orders (create, edit, hold, pay). Everyone else (admin, supervisor) only watches
+// and manages: they can read everything, void with a PIN and handle stock, but never create or change an order.
+// To let supervisors take orders too, add 'supervisor' here (and in canHandleOrders() in public/index.html).
+const ORDER_HANDLER_ROLES = ['kasir'];
+const canHandleOrders = (user) => !!user && ORDER_HANDLER_ROLES.includes(user.role);
+function requireOrderHandler(req, res, next) {
+  if (canHandleOrders(req.user)) return next();
+  res.status(403).json({ error: `Akun ${req.user ? req.user.role : 'ini'} tidak dapat membuat atau mengubah pesanan` });
+}
+
 // Validates and normalises the body of POST/PUT /api/admin/products. Throws HttpError(400).
 // image_url: undefined = not provided (edit keeps the current one), null = clear it, string = new link.
 // low_stock_threshold: null = not provided (create uses 5, edit keeps the current one).
@@ -1459,7 +1469,7 @@ app.get('/api/orders/:id', async (req, res) => {
 });
 
 // POST /api/orders { order_type, table_id?, platform?, customer_name?, items: [{product_id, qty, note?}] }
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', requireOrderHandler, async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -1564,7 +1574,7 @@ app.post('/api/orders', async (req, res) => {
 
 // PUT /api/orders/:id { items: [{product_id, qty, note?}], discount_percent? }
 // Replaces the items of an unpaid order in one transaction ("Simpan Pesanan" on an existing order).
-app.put('/api/orders/:id', async (req, res) => {
+app.put('/api/orders/:id', requireOrderHandler, async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -1609,7 +1619,7 @@ app.put('/api/orders/:id', async (req, res) => {
 });
 
 // POST /api/orders/:id/items { product_id, qty, note? }
-app.post('/api/orders/:id/items', async (req, res) => {
+app.post('/api/orders/:id/items', requireOrderHandler, async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -1669,7 +1679,7 @@ app.post('/api/orders/:id/items', async (req, res) => {
 });
 
 // PATCH /api/orders/:id/items/:itemId { qty }
-app.patch('/api/orders/:id/items/:itemId', async (req, res) => {
+app.patch('/api/orders/:id/items/:itemId', requireOrderHandler, async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -1709,7 +1719,7 @@ app.patch('/api/orders/:id/items/:itemId', async (req, res) => {
 });
 
 // PATCH /api/orders/:id/status { status }
-app.patch('/api/orders/:id/status', async (req, res) => {
+app.patch('/api/orders/:id/status', requireOrderHandler, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -1741,7 +1751,7 @@ app.patch('/api/orders/:id/status', async (req, res) => {
 });
 
 // POST /api/orders/:id/pay { payments: [{ payment_method_id, amount, reference_no? }], discount_percent?, auth_pin? }
-app.post('/api/orders/:id/pay', async (req, res) => {
+app.post('/api/orders/:id/pay', requireOrderHandler, async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -1927,8 +1937,12 @@ app.post('/api/orders/:id/void', async (req, res) => {
 // ---------- SHIFT ----------
 
 // GET /api/shifts/current
+// An account that does not run shifts (admin, supervisor) gets "no shift, hidden" instead of an error, so the browser
+// shows no shift card and no "shift belum dibuka" message for them.
 app.get('/api/shifts/current', async (req, res) => {
   try {
+    if (!canHandleOrders(req.user)) return res.json({ shift: null, hidden: true });
+
     const [shifts] = await db.query(
       'SELECT * FROM shifts WHERE cashier_id = ? AND status = "open" ORDER BY id DESC LIMIT 1',
       [req.user.id]
@@ -1979,7 +1993,7 @@ app.get('/api/shifts/current', async (req, res) => {
 });
 
 // POST /api/shifts/open { opening_cash }
-app.post('/api/shifts/open', async (req, res) => {
+app.post('/api/shifts/open', requireOrderHandler, async (req, res) => {
   try {
     const opening_cash = Number(req.body.opening_cash) || 0;
 
@@ -2003,7 +2017,7 @@ app.post('/api/shifts/open', async (req, res) => {
 });
 
 // POST /api/shifts/cash-movement { type: 'in'|'out', amount, reason }
-app.post('/api/shifts/cash-movement', async (req, res) => {
+app.post('/api/shifts/cash-movement', requireOrderHandler, async (req, res) => {
   try {
     const { type, amount, reason } = req.body;
     if (!['in', 'out'].includes(type) || !amount || Number(amount) <= 0) {
@@ -2030,7 +2044,7 @@ app.post('/api/shifts/cash-movement', async (req, res) => {
 });
 
 // POST /api/shifts/close { actual_cash }
-app.post('/api/shifts/close', async (req, res) => {
+app.post('/api/shifts/close', requireOrderHandler, async (req, res) => {
   try {
     const actual_cash = Number(req.body.actual_cash);
     if (isNaN(actual_cash)) {

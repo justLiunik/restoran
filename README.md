@@ -152,19 +152,42 @@ Buka browser ke **http://localhost:3000**, lalu login (lihat bagian berikut). Bi
 
 | Username | Peran | Keterangan |
 |---|---|---|
-| `budi` | Kasir | Transaksi harian |
-| `sari` | Kasir | Transaksi harian |
-| `spv` | Supervisor | Punya PIN untuk otorisasi |
-| `admin` | Admin | Punya PIN untuk otorisasi |
+| `budi` | Kasir | Transaksi harian: menjalankan shift dan menangani pesanan |
+| `sari` | Kasir | Transaksi harian: menjalankan shift dan menangani pesanan |
+| `spv` | Supervisor | Punya PIN untuk otorisasi. Memantau dan mengelola, **hanya lihat** untuk pesanan |
+| `admin` | Admin | Punya PIN untuk otorisasi. Memantau dan mengelola, **hanya lihat** untuk pesanan |
 
 - **Password:** yang ditampilkan di Langkah 7 (sama untuk semua pengguna). Setelah masuk, admin bisa menambah akun dan mengganti password atau PIN lewat tab **Kelola User**, dan siapa pun bisa mengganti password sendiri lewat tombol **🔑** (lihat di bawah).
 - **PIN:** yang ditampilkan di Langkah 7. PIN diminta saat kasir memberi **diskon di atas 20%** atau **membatalkan (void) transaksi**, lalu supervisor atau admin memasukkan PIN-nya.
 
 > Password dan PIN hanya untuk pengembangan lokal. Kalau aplikasi dipasang di server sungguhan, ganti dengan nilai yang kuat lewat `SEED_PASSWORD` dan `SEED_PIN`.
 
+### Siapa yang Menangani Pesanan
+
+**Hanya kasir** yang menjalankan shift dan membuat atau mengubah pesanan. **Admin dan supervisor** adalah akun pemantau dan pengelola: mereka melihat semuanya, tetapi tidak bisa menyentuh pesanan.
+
+| | Kasir | Admin / Supervisor |
+|---|---|---|
+| Kartu **Shift Kasir Aktif**, buka/tutup shift, kas keluar | Ya | Tidak tampil, server menolak (403) |
+| **+ Pesanan Baru**, klik meja kosong, klik kartu menu untuk menambah item | Ya | Tidak tampil / tidak bisa diklik, server menolak (403) |
+| Simpan, Hold, Bayar, ubah jumlah, catatan item, diskon, ubah status | Ya | Tidak ada tombolnya, server menolak (403) |
+| Melihat ringkasan, denah meja, daftar pesanan, riwayat transaksi, laporan, stok | Ya | Ya |
+| Membuka pesanan aktif (tombol **Lihat**: item, catatan, total, status, nama kasir) | Bisa mengubah | **Hanya baca** |
+| Cetak ulang struk, **void** dengan PIN supervisor, tambah stok, koreksi stok | Ya | Ya |
+
+Admin dan supervisor melihat lencana **Mode Admin (hanya lihat)** di bagian atas supaya jelas mengapa tombol pesanan tidak ada. Penolakan server berbunyi *"Akun admin tidak dapat membuat atau mengubah pesanan"*. Peran dibaca dari database pada setiap permintaan, jadi mengubah peran seseorang berlaku seketika.
+
+- **Pesanan dan shift lama** yang dibuat akun admin atau supervisor tetap ada dan tetap masuk laporan; tidak ada yang dihapus. Kalau sebuah akun admin/supervisor masih punya **shift yang terbuka** di database, shift itu tidak bisa lagi ditutup dari aplikasi (dan akun itu tidak bisa dinonaktifkan selama shiftnya terbuka). Tutup manual dengan satu perintah SQL, ganti `<id admin>` dengan id akunnya (lihat lewat `SELECT id, username, role FROM users;`):
+
+  ```sql
+  UPDATE shifts SET status='closed', closed_at=NOW() WHERE cashier_id = <id admin> AND status='open';
+  ```
+- **Reservasi** tetap bisa dicatat dan diubah semua peran, tetapi tombol **Tamu Datang** dan **Buka Pesanan** (yang membuka pesanan baru) hanya muncul untuk kasir.
+- **Mengizinkan supervisor ikut menangani pesanan** nanti cukup mengubah dua tempat: `ORDER_HANDLER_ROLES` di `server.js` dan fungsi `canHandleOrders()` di `public/index.html`.
+
 ### Alur Pesanan
 
-Membuat atau menyimpan pesanan butuh **shift yang sudah dibuka** (kasir `budi` sudah punya shift terbuka di data awal).
+Membuat atau menyimpan pesanan butuh **shift yang sudah dibuka** (kasir `budi` sudah punya shift terbuka di data awal). Alur di bawah ini untuk **kasir**; admin dan supervisor hanya bisa melihat pesanan (lihat bagian di atas).
 
 | Aksi | Hasilnya |
 |---|---|
@@ -213,7 +236,7 @@ Tab **🛠️ Kelola Menu** hanya muncul untuk **Admin** dan **Supervisor** (kas
 
 ### Reservasi
 
-Kartu **📅 Reservasi** ada di tab **Denah Meja & Pesanan**, di bawah denah. Semua peran (kasir, supervisor, admin) bisa mencatat dan memproses reservasi. Reservasi dicatat langsung oleh staf saat tamu datang ke restoran (belum ada booking lewat telepon atau online).
+Kartu **📅 Reservasi** ada di tab **Denah Meja & Pesanan**, di bawah denah. Semua peran (kasir, supervisor, admin) bisa mencatat dan memproses reservasi, kecuali **Tamu Datang** dan **Buka Pesanan** yang membuka pesanan baru dan hanya untuk kasir. Reservasi dicatat langsung oleh staf saat tamu datang ke restoran (belum ada booking lewat telepon atau online).
 
 | Aksi | Hasilnya |
 |---|---|
@@ -427,6 +450,9 @@ Database belum diperbarui. Jalankan `npm run db:migrate`, lalu muat ulang halama
 
 **"Pengaturan pajak dan service belum lengkap" atau `Unknown column 'tax_rate'` saat membuat atau membayar pesanan**
 Database belum diperbarui setelah `git pull`. Jalankan `npm run db:migrate`, lalu muat ulang halaman. Data tidak hilang.
+
+**"Akun admin tidak dapat membuat atau mengubah pesanan" (atau tidak ada tombol Pesanan Baru dan kartu Shift)**
+Itu disengaja: hanya akun **Kasir** yang menangani pesanan dan shift. Login sebagai kasir (mis. `budi`) untuk membuat pesanan. Lihat [Siapa yang Menangani Pesanan](#siapa-yang-menangani-pesanan).
 
 **Tiba-tiba keluar sendiri ("Sesi berakhir" atau "Akun tidak aktif")**
 Itu disengaja: password akunmu baru direset atau diganti, atau akunmu dinonaktifkan oleh admin. Login lagi dengan password yang baru, atau minta admin mengaktifkan akunmu di tab **Kelola User**.
